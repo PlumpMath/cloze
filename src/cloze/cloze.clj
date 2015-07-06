@@ -1,8 +1,7 @@
 (ns cloze.cloze
   (:require [clojure.zip :as zip]
             [clojure.test :as t]
-            [cloze.zip-utils :as zu]
-            [arcadia.internal.map-utils :as mu])) ;; TEMP
+            [cloze.zip-utils :as zu]))
 
 ;; ============================================================
 ;; utils
@@ -128,10 +127,7 @@
 ;; should probably implement a protocol or some bullshit
 (defrecord CtxNode [ctx expr])
 
-(def log (atom []))
-
 (defn ctx-branch? [^CtxNode node]
-  (swap! log conj node)
   (expr-branch? (.expr node)))
 
 ;; hmmmm what's the children? Does this cover traversing into the
@@ -147,9 +143,6 @@
     (for [cexpr (expr-children expr)]  ;; or whatever. children fn of an expr-that-might-be-a-clozeur. 
       (CtxNode. children-ctx cexpr))))
 
-;; (def ctx-make-node-log
-;;   (atom []))
-
 (defn ctx-make-node [^CtxNode node, kids]
   (let [ctx (.ctx node)
         expr (.expr node)
@@ -158,9 +151,6 @@
               (expr-make-node expr
                 (for [^CtxNode node2 kids]
                   (.expr node2))))]
-    ;; (swap! ctx-make-node-log conj
-    ;;   (assoc (mu/lit-map node, kids, res)
-    ;;     :stack (stackseq-methods)))
     res))
 
 ;; check order of the following
@@ -192,9 +182,6 @@
           (put-variables (into (variables clz) (map variables clzs)))
           (put-bindings (into (bindings clz) (map bindings clzs))))))))
 
-(def minimize-log
-  (atom []))
-  
 (defn minimize
   "Let res be clz with all its bound variables removed. If res has no
   free variables, minimize-clozeur returns (expression clz), otherwise
@@ -202,7 +189,6 @@
   but not yet replaced in (expression clz) they will effectively
   become open symbols; to avoid this, use collapse instead."
   [clz]
-  (swap! minimize-log conj clz)
   (assert (clozeur? clz) "requires clozeur")
   (let [vs2 (reduce disj
               (variables clz)
@@ -225,8 +211,6 @@
 ;; recursively or whatever I guess. Might be getting a little anal
 ;; with the types, could make this accept both clozeurs and CtxNodes
 
-(def cw-log (atom []))
-
 ;; sketchy algorithm
 (defn- collapse-walk [clz]
   (assert (clozeur? clz) "requires clozeur") ;; this is stupid
@@ -239,17 +223,9 @@
               bndgs2 (reduce dissoc bndgs (keys ctx))]
           (recur
             (if-let [[_ expr2] (find bndgs2 expr)]
-              (let [loc3 (zip/replace loc2 (assoc node :expr expr2))]
-                (swap! cw-log conj
-                  (mu/lit-map node bndgs bndgs2 node ctx expr expr2 loc3))
-                loc3)
-              (do
-                (swap! cw-log conj
-                  (mu/lit-map node bndgs bndgs2 node ctx expr))
-                loc2))))
+              (zip/replace loc2 (assoc node :expr expr2))
+              loc2)))
         (let [^CtxNode r (zip/root loc)]
-          (swap! cw-log conj
-            {:bndgs bndgs :ctx-node r})
           (minimize
             (put-expression clz (.expr r))))))))
 

@@ -9,7 +9,7 @@ Experimental library for rewritable data templates. More to come if experiments 
 
 The plan is to provide a fully extensible, context-sensitive replacement protocol for elements that can manipulate and examine their context within a data structure, enabling otherwise difficult or impossible behavior such as splicing to be defined ala carte. This can be achieved by passing the zipper itself (as a reification of the current position within the data structure) to the replacement method of certain elements.
 
-```
+```clojure
 (->
   (clozeur '#{a} '[:start a :end])
   (bind 'a (splicing [0 1 2 3]))

@@ -4,9 +4,6 @@
             [cloze.zip-utils :as zu]))
 
 ;; ============================================================
-;; utils
-
-;; ============================================================
 ;; clozeur
 
 ;; no attempt to define polymorphic interface for now, but room to in
@@ -40,7 +37,7 @@
     (.expression clz)))
 
 (defn put-bindings [clz bndgs]
-  (assert ;; not really sure if I should enforce this. Maybe not, you know?
+  (assert ;; perhaps this should not be enforced
     (every? (variables clz) (keys bndgs))
     (str "variables " (remove (variables clz) (keys bndgs)) " not in clozeur"))
   (assoc clz :bindings bndgs))
@@ -84,14 +81,15 @@
 ;; ============================================================
 ;; expr-zip
 
-;; I guess these should be polymorphic. Behold: they aren't. Fix later.
+;; TODO: polymorphic version
+
 (defn- expr-branch? [x]
   (or (coll? x) (clozeur? x)))
 
 (defn- expr-children [x]
   (cond
     (clozeur? x) (list (variables x) (bindings x) (expression x)) ;; meh maybe should do it more map-like
-    (coll? x) (seq x) ;; bla. should be seqable or something, I know.
+    (coll? x) (seq x) ;; should be seqable or something
     :else (throw (Exception. "requires either standard clojure collection or clozeur"))))
 
 (defn- list-like? [x]
@@ -124,15 +122,11 @@
     (when-not (zip/end? nxt)
       nxt)))
 
-;; should probably implement a protocol or some bullshit
 (defrecord CtxNode [ctx expr])
 
 (defn ctx-branch? [^CtxNode node]
   (expr-branch? (.expr node)))
 
-;; hmmmm what's the children? Does this cover traversing into the
-;; bindings of a Clozeur vs into the expression? Do we need special
-;; types or something for that?
 ;; defining this NOT as a higher-order zipper per se, because those are headaches
 (defn ctx-children [^CtxNode node]
   (let [ctx (.ctx node)
@@ -140,7 +134,7 @@
         children-ctx (if (clozeur? expr)
                        (merge ctx (bindings expr))
                        ctx)]
-    (for [cexpr (expr-children expr)]  ;; or whatever. children fn of an expr-that-might-be-a-clozeur. 
+    (for [cexpr (expr-children expr)]
       (CtxNode. children-ctx cexpr))))
 
 (defn ctx-make-node [^CtxNode node, kids]
@@ -161,8 +155,6 @@
     ctx-children
     ctx-make-node
     ctx-node))
-
-(declare clozeur?) ;; should probably be a multimethod or something. blah.
 
 ;; following runs right into variable capturing awkwardness. Can deal
 ;; with it in the obvious ways - rewrite subclozeurs with gensyms, or
@@ -211,9 +203,8 @@
 ;; recursively or whatever I guess. Might be getting a little anal
 ;; with the types, could make this accept both clozeurs and CtxNodes
 
-;; sketchy algorithm
 (defn- collapse-walk [clz]
-  (assert (clozeur? clz) "requires clozeur") ;; this is stupid
+  (assert (clozeur? clz) "requires clozeur") ;; fix this
   (let [bndgs (bindings clz)]
     (loop [loc (ctx-zip (CtxNode. {} (expression clz)))] ;tricksy
       (if-let [loc2 (znext loc)]
@@ -229,19 +220,8 @@
           (minimize
             (put-expression clz (.expr r))))))))
 
-;; there's collapse, and then there's total-collapse. total-collapse
-;; attempts to eliminate all clozeurs at every depth. collapse
-;; attempts to eliminate only the top clozeur (I guess). Neither
-;; throws an error if the entire clozeur or clozeurs cannot be
-;; eliminated because they don't have all their free variables bound,
-;; but you could write something else that validates for that. Except
-;; then total-collapse is really a partial-collapse. Hm. Maybe it
-;; should be collapse vs collapse-all.
-
-
-
 ;; ============================================================
-;; tests
+;; preliminary tests
 
 (t/deftest test-collapse
   (let [clz1 (clozeur '#{a b x}

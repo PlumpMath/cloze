@@ -1,6 +1,6 @@
 # cloze
 
-Currently experimental library for rewritable data templates. More to come if experiments bear fruit.
+Experimental library for rewritable data templates. More to come if experiments bear fruit.
 
 ## Goals and questions
 

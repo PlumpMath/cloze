@@ -1,7 +1,8 @@
 (ns cloze.cloze
   (:require [clojure.zip :as zip]
             [clojure.test :as t]
-            [arcadia.internal.zip-utils :as zu]))
+            [cloze.zip-utils :as zu]
+            [arcadia.internal.map-utils :as mu])) ;; TEMP
 
 ;; ============================================================
 ;; utils
@@ -21,8 +22,9 @@
 
  ;; sloppy for now
 (defn collapse-all [expr] ;; need not be clozeur
-  (zu/zip-prewalk (expr-zip expr)
-    #(if (clozeur? %) (collapse %) %)))
+  (zip/root
+    (zu/zip-prewalk (expr-zip expr)
+      #(if (clozeur? %) (collapse %) %))))
 
 ;; keeping static type stuff internal to fns for now, out of deference
 ;; to potential future polymorphism
@@ -98,8 +100,8 @@
 
 (defn- expr-make-node [x kids]
   (cond
-    (list-like? x) (with-meta (into x (reverse kids)) (meta x))
-    (coll? x) (with-meta (into x kids) (meta x))
+    (list-like? x) (with-meta (into (empty x) (reverse kids)) (meta x))
+    (coll? x) (with-meta (into (empty x) kids) (meta x))
     (clozeur? x) (let [[vs bndgs expr] kids]
                    (->
                      (put-variables vs)
@@ -145,18 +147,21 @@
     (for [cexpr (expr-children expr)]  ;; or whatever. children fn of an expr-that-might-be-a-clozeur. 
       (CtxNode. children-ctx cexpr))))
 
-(def ctx-make-node-log
-  (atom []))
+;; (def ctx-make-node-log
+;;   (atom []))
 
 (defn ctx-make-node [^CtxNode node, kids]
-  (swap! ctx-make-node-log conj [node, kids])
   (let [ctx (.ctx node)
-        expr (.expr node)]
-    (CtxNode.
-      ctx
-      (expr-make-node expr
-        (for [^CtxNode node2 kids]
-          (.expr node2))))))
+        expr (.expr node)
+        res (CtxNode.
+              ctx
+              (expr-make-node expr
+                (for [^CtxNode node2 kids]
+                  (.expr node2))))]
+    ;; (swap! ctx-make-node-log conj
+    ;;   (assoc (mu/lit-map node, kids, res)
+    ;;     :stack (stackseq-methods)))
+    res))
 
 ;; check order of the following
 (defn- ctx-zip [ctx-node]
@@ -219,8 +224,12 @@
 ;; just collapses the current clz. for collapse-all, use this
 ;; recursively or whatever I guess. Might be getting a little anal
 ;; with the types, could make this accept both clozeurs and CtxNodes
+
+(def cw-log (atom []))
+
+;; sketchy algorithm
 (defn- collapse-walk [clz]
-  (assert (clozeur? clz) "requires clozeur")
+  (assert (clozeur? clz) "requires clozeur") ;; this is stupid
   (let [bndgs (bindings clz)]
     (loop [loc (ctx-zip (CtxNode. {} (expression clz)))] ;tricksy
       (if-let [loc2 (znext loc)]
@@ -230,13 +239,17 @@
               bndgs2 (reduce dissoc bndgs (keys ctx))]
           (recur
             (if-let [[_ expr2] (find bndgs2 expr)]
-              (zip/replace loc2
-                (assoc node :expr
-                  'fuzzum
-                  ;expr2
-                  )) ;; hopefully it will zip into this; test tho
-              loc2)))
+              (let [loc3 (zip/replace loc2 (assoc node :expr expr2))]
+                (swap! cw-log conj
+                  (mu/lit-map node bndgs bndgs2 node ctx expr expr2 loc3))
+                loc3)
+              (do
+                (swap! cw-log conj
+                  (mu/lit-map node bndgs bndgs2 node ctx expr))
+                loc2))))
         (let [^CtxNode r (zip/root loc)]
+          (swap! cw-log conj
+            {:bndgs bndgs :ctx-node r})
           (minimize
             (put-expression clz (.expr r))))))))
 

@@ -21,6 +21,30 @@ Experimental library for rewritable data templates. More to come if experiments 
 
 ```
 
+```clojure
+(def clz1
+  (clozeur '#{a b x}
+    '(fn [x]
+       (when a b))))
+
+(collapse-all
+  (bind clz1
+    'x 'num
+    'a '(number? num)
+    'b (bind clz1
+         'x 'x
+         'a '(odd? num)
+         'b '(+ 13 x))))
+         
+;;=>
+;; '(fn [num]
+;;    (when (number? num)
+;;      (fn [x]
+;;        (when (odd? num)
+;;          (+ 13 x)))))
+
+```
+
 ## Goals and questions
 
 - Implement lambda-calculus-like system with associative interface.

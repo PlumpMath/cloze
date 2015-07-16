@@ -129,6 +129,7 @@
 
 ;; defining this NOT as a higher-order zipper per se, because those are headaches
 (defn ctx-children [^CtxNode node]
+  (cast CtxNode node)
   (let [ctx (.ctx node)
         expr (.expr node)
         children-ctx (if (clozeur? expr)
@@ -203,22 +204,30 @@
 ;; recursively or whatever I guess. Might be getting a little anal
 ;; with the types, could make this accept both clozeurs and CtxNodes
 
+(def cw-log (atom []))
+
 (defn- collapse-walk [clz]
   (assert (clozeur? clz) "requires clozeur") ;; fix this
   (let [bndgs (bindings clz)]
     (loop [loc (ctx-zip (CtxNode. {} (expression clz)))] ;tricksy
+      (swap! cw-log conj loc)
       (if-let [loc2 (znext loc)]
-        (let [^CtxNode node (zip/node loc2)
-              ctx (.ctx node)
-              expr (.expr node)
-              bndgs2 (reduce dissoc bndgs (keys ctx))]
-          (recur
-            (if-let [[_ expr2] (find bndgs2 expr)]
-              (zip/replace loc2 (assoc node :expr expr2))
-              loc2)))
-        (let [^CtxNode r (zip/root loc)]
-          (minimize
-            (put-expression clz (.expr r))))))))
+        (do (when (= loc2 loc)
+              (swap! cw-log [:FAIL!! loc])
+              (throw (Exception. "(= loc (znext loc)), somehow. It shouldn't.")))
+            (let [^CtxNode node (zip/node loc2)
+                  ctx (.ctx node)
+                  expr (.expr node)
+                  bndgs2 (reduce dissoc bndgs (keys ctx))]
+              (recur
+                (if-let [[_ expr2] (find bndgs2 expr)]
+                  (zip/replace loc2 (assoc node :expr expr2))
+                  loc2))))
+        (let [^CtxNode r (zip/root loc)
+              res (minimize
+                    (put-expression clz (.expr r)))]
+          (swap! cw-log [:RESULT res])
+          res)))))
 
 ;; ============================================================
 ;; preliminary tests

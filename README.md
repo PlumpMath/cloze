@@ -2,6 +2,52 @@
 
 Experimental library for rewritable data templates. More to come if experiments bear fruit.
 
+## Status
+
+Utterly unstable, don't use yet.
+
+## Basic usage
+
+Still working out exact API details, but the general idea is to associate data structures with first-class binding scopes that can hold onto replacements until rewrite is explicitly triggered with ```collapse``` or ```collapse-all```. Should implement normal Clojure associative API, including nested replacements. 
+
+```clojure
+
+(def clz1
+  (clozeur '#{a b x}
+    '(fn [x]
+       (when a b))))
+
+(collapse
+  (bind clz1
+    'x 'x
+    'a '(number? x)
+    'b '(+ 13 x)))
+
+;;=>
+;; '(fn [x]
+;;    (when (number? x)
+;;      (+ 13 x)))
+
+(collapse-all
+  (bind clz1
+    'x 'num
+    'a '(number? num)
+    'b (bind clz1
+         'x 'x
+         'a '(odd? num)
+         'b '(+ 13 x))))
+
+;;=>
+;; '(fn [num]
+;;    (when (number? num)
+;;      (fn [x]
+;;        (when (odd? num)
+;;          (+ 13 x)))))
+
+```
+
+
+
 ## Goals and questions
 
 - Implement lambda-calculus-like system with associative interface.

@@ -13,8 +13,8 @@
 
 (defrecord Clozeur [variables bindings expression])
 
-(defn collapse [clz]
-  (collapse-walk clz))
+(defn collapse [expr]
+  (collapse-walk-1 expr))
 
  ;; sloppy for now
 (defn collapse-all [expr] ;; need not be clozeur
@@ -61,6 +61,14 @@
        (partition 2
          (list* v x ys))))))
 
+;; now need to make it work wiht usual clojure associative interface...
+;; in the meantime:
+
+(defn bind-in [clz [k & ks] v]
+  (if ks
+    (bind clz k (bind-in (get (.bindings clz) k) ks v))
+    (bind clz k v)))
+
 (defn unbind [clz v]
   (-> clz
     (put-bindings (dissoc (bindings clz) v))
@@ -79,7 +87,11 @@
   ([variables expression]
    (clozeur variables {} expression))
   ([variables bindings expression]
-   (Clozeur. variables bindings expression)))
+   (let [v (into variables (keys bindings))]
+     (assert (set? v)) 
+     (Clozeur. v
+       bindings
+       expression))))
 
 ;; ============================================================
 ;; expr-zip
@@ -208,92 +220,111 @@
 ;; with the types, could make this accept both clozeurs and CtxNodes
 
 
-
+;; should be imperatively setting this during rewrite stages below; am not.
 (def ^:dynamic *bail* 1000)
 
-(def cclz-log (atom []))
+(defmacro bail-up [i & body]
+  `(binding [*bail* (when *bail* (+ *bail* ~i))]
+     ~@body))
 
 ;; just one level
-(defn- collapse-cloze
+(defn collapse-cloze
   ([clz]
    (collapse-cloze clz {}))
   ([clz ctx0]
    (assert (clozeur? clz) "requires clozeur") ;; fix this, perhaps at collapse (above)
    (let [bndgs (bindings clz)]
-      ;; seems like there should be a better way than looping over 2
-      ;; locs, but that would require thinking
      (loop [prev-loc (ctx-zip ;; tricksy
                        (CtxNode. ctx0 ;; riiight?
                          (expression clz)))
             loc (znext prev-loc)
             i 0]
-       ;;(swap! cclz-log conj loc)
-       (if (<= *bail* i)
+       (if (and *bail* (<= *bail* i))
          (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
          (if loc
            (let [^CtxNode node (zip/node loc)
-                 ctx (.ctx node)
-                 expr (.expr node)
-                 bndgs2 (reduce dissoc bndgs (keys ctx))]
-             (recur
-               loc
-               (if-let [[_ expr2] (find bndgs2 expr)]
-                 (zu/zip-up-to-right ;; move OVER replacements
-                   (zip/replace loc (assoc node :expr expr2)))
-                 (znext loc))
-               (inc i)))
-           (let [^CtxNode r (zip/root prev-loc)
-                 res (minimize
-                       (put-expression clz (.expr r)))]
-             (swap! cw-log conj [:RESULT res])
-             res)))))))
+                 bndgs2 (reduce dissoc bndgs (keys (.ctx node)))]
+             (if-let [[_ expr2] (find bndgs2 (.expr node))]
+               (let [loc2 (zip/replace loc (assoc node :expr expr2))]
+                 (recur loc2 (zu/zip-up-to-right loc2) (inc i)))
+               (recur loc (znext loc) (inc i))))
+           (let [^CtxNode r (zip/root prev-loc)]
+             (minimize (put-expression clz (.expr r)))) ))))))
 
-(def cw-log (atom []))
+;; will NOT burrow into replacements
+(defn collapse-walk-1 [expr]
+  (loop [prev-loc nil
+         loc (expr-zip expr)
+         i 0]
+    (if (and *bail* (<= *bail* i))
+      (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
+      (if loc
+        (let [expr (zip/node loc)]
+          (if (clozeur? expr)
+            (let [loc2 (zip/replace loc
+                         (bail-up i (collapse-cloze expr)))]
+              (recur loc2 (zu/zip-up-to-right loc2) (inc i)))
+            (recur loc (znext loc) (inc i))))
+        (zip/root prev-loc)))))
 
-(defn- collapse-walk [expr]
-  (let [step (fn step [loc]
-               (swap! cw-log conj loc)
-               (when loc
-                 (let [expr (zip/node loc)]
-                   (znext
-                     (if (clozeur? expr)
-                       (zip/replace loc ;; will burrow in
-                         (collapse-cloze expr))
-                       loc)))))]
-    (->> expr
-      expr-zip
-      (iterate step)
-      (take *bail*) ;; bit clunki
-      (remove nil?)
-      last
-      zip/root)))
+ ;; WILL burrow into replacements; rather dangerous
+(defn collapse-walk-deep [expr]
+  (zip/root
+    (loop [prev-loc nil
+           loc (expr-zip expr)
+           i 0]
+      (if (and *bail* (<= *bail* i))
+        (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
+        (if loc
+          (let [expr (zip/node loc)]
+            (recur loc
+              (znext
+                (if (clozeur? expr)
+                  (zip/replace loc
+                    (bail-up i (collapse-cloze expr)))
+                  loc))
+              (inc i)))
+          prev-loc)))))
+
+(defn- fixpoint [f x]
+  (loop [x x]
+    (let [y (f x)]
+      (if (= y x)
+        y
+        (recur y)))))
+
+;; like mathematica's replace-all-repeated. goes to fixpoint. not
+;; cheap, and might not terminate, but the best.
+(defn collapse-walk-repeated [expr]
+  (fixpoint collapse-walk-1 expr))
 
 ;; ============================================================
 ;; preliminary tests
 
-(t/deftest test-collapse
-  (let [clz1 (clozeur '#{a b x}
-               '(fn [x]
-                  (when a b)))]
-    (t/is (= (collapse
-               (bind clz1
-                 'x 'x
-                 'a '(number? x)
-                 'b '(+ 13 x)))
-            '(fn [x]
-               (when (number? x)
-                 (+ 13 x)))))
-    (let [clz2 (bind clz1
-                 'x 'num
-                 'a '(number? num)
-                 'b (bind clz1
-                      'x 'x
-                      'a '(odd? num)
-                      'b '(+ 13 x)))]
-      (t/is 
-        (= (collapse-all clz2)
-          '(fn [num]
-             (when (number? num)
-               (fn [x]
-                 (when (odd? num)
-                   (+ 13 x))))))))))
+(comment
+  (t/deftest test-collapse
+    (let [clz1 (clozeur '#{a b x}
+                 '(fn [x]
+                    (when a b)))]
+      (t/is (= (collapse
+                 (bind clz1
+                   'x 'x
+                   'a '(number? x)
+                   'b '(+ 13 x)))
+              '(fn [x]
+                 (when (number? x)
+                   (+ 13 x)))))
+      (let [clz2 (bind clz1
+                   'x 'num
+                   'a '(number? num)
+                   'b (bind clz1
+                        'x 'x
+                        'a '(odd? num)
+                        'b '(+ 13 x)))]
+        (t/is 
+          (= (collapse-all clz2)
+            '(fn [num]
+               (when (number? num)
+                 (fn [x]
+                   (when (odd? num)
+                     (+ 13 x)))))))))))

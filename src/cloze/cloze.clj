@@ -75,8 +75,11 @@
     (variables clz)
     (keys (bindings clz))))
 
-(defn clozeur [variables expression]
-  (Clozeur. variables {} expression))
+(defn clozeur
+  ([variables expression]
+   (clozeur variables {} expression))
+  ([variables bindings expression]
+   (Clozeur. variables bindings expression)))
 
 ;; ============================================================
 ;; expr-zip
@@ -98,13 +101,13 @@
 (defn- expr-make-node [x kids]
   (cond
     (list-like? x) (with-meta (into (empty x) (reverse kids)) (meta x))
-    (coll? x) (with-meta (into (empty x) kids) (meta x))
     (clozeur? x) (let [[vs bndgs expr] kids]
-                   (->
+                   (-> x
                      (put-variables vs)
                      (put-bindings bndgs)
                      (put-expression expr)
                      (with-meta (meta x))))
+    (coll? x) (with-meta (into (empty x) kids) (meta x))
     :else (throw (Exception. "requires either standard clojure collection or clozeur"))))
 
 (defn expr-zip [x]
@@ -206,28 +209,34 @@
 
 (def cw-log (atom []))
 
+(def ^:dynamic *bail* 1000)
+
 (defn- collapse-walk [clz]
   (assert (clozeur? clz) "requires clozeur") ;; fix this
   (let [bndgs (bindings clz)]
-    (loop [loc (ctx-zip (CtxNode. {} (expression clz)))] ;tricksy
+    (loop [loc (ctx-zip (CtxNode. {} (expression clz)))  ;tricksy
+           i 0]
       (swap! cw-log conj loc)
-      (if-let [loc2 (znext loc)]
-        (do (when (= loc2 loc)
-              (swap! cw-log [:FAIL!! loc])
-              (throw (Exception. "(= loc (znext loc)), somehow. It shouldn't.")))
-            (let [^CtxNode node (zip/node loc2)
-                  ctx (.ctx node)
-                  expr (.expr node)
-                  bndgs2 (reduce dissoc bndgs (keys ctx))]
-              (recur
-                (if-let [[_ expr2] (find bndgs2 expr)]
-                  (zip/replace loc2 (assoc node :expr expr2))
-                  loc2))))
-        (let [^CtxNode r (zip/root loc)
-              res (minimize
-                    (put-expression clz (.expr r)))]
-          (swap! cw-log [:RESULT res])
-          res)))))
+      (if (<= *bail* i)
+        (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
+        (if-let [loc2 (znext loc)]
+          (do (when (= loc2 loc)
+                (swap! cw-log conj [:FAIL!! loc])
+                (throw (Exception. "(= loc (znext loc)), somehow. It shouldn't.")))
+              (let [^CtxNode node (zip/node loc2)
+                    ctx (.ctx node)
+                    expr (.expr node)
+                    bndgs2 (reduce dissoc bndgs (keys ctx))]
+                (recur
+                  (if-let [[_ expr2] (find bndgs2 expr)]
+                    (zip/replace loc2 (assoc node :expr expr2))
+                    loc2)
+                  (inc i))))
+          (let [^CtxNode r (zip/root loc)
+                res (minimize
+                      (put-expression clz (.expr r)))]
+            (swap! cw-log conj [:RESULT res])
+            res))))))
 
 ;; ============================================================
 ;; preliminary tests

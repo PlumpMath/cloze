@@ -227,7 +227,7 @@
                          (expression clz)))
             loc (znext prev-loc)
             i 0]
-       (swap! cclz-log conj loc)
+       ;;(swap! cclz-log conj loc)
        (if (<= *bail* i)
          (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
          (if loc
@@ -250,33 +250,23 @@
 
 (def cw-log (atom []))
 
-;; NOT A GOOD POLICY. Variable capture.
-(defn- collapse-walk [clz]
-  (assert (clozeur? clz) "requires clozeur") ;; fix this, perhaps at collapse (above)
-  (let [bndgs (bindings clz)]
-    (loop [loc (ctx-zip (CtxNode. {} (expression clz)))  ;tricksy
-           i 0]
-      (swap! cw-log conj loc)
-      (if (<= *bail* i)
-        (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
-        (if-let [loc2 (znext loc)]
-          (do (when (= loc2 loc)
-                (swap! cw-log conj [:FAIL!! loc])
-                (throw (Exception. "(= loc (znext loc)), somehow. It shouldn't.")))
-              (let [^CtxNode node (zip/node loc2)
-                    ctx (.ctx node)
-                    expr (.expr node)
-                    bndgs2 (reduce dissoc bndgs (keys ctx))]
-                (recur
-                  (if-let [[_ expr2] (find bndgs2 expr)]
-                    (zip/replace loc2 (assoc node :expr expr2))
-                    loc2)
-                  (inc i))))
-          (let [^CtxNode r (zip/root loc)
-                res (minimize
-                      (put-expression clz (.expr r)))]
-            (swap! cw-log conj [:RESULT res])
-            res))))))
+(defn- collapse-walk [expr]
+  (let [step (fn step [loc]
+               (swap! cw-log conj loc)
+               (when loc
+                 (let [expr (zip/node loc)]
+                   (znext
+                     (if (clozeur? expr)
+                       (zip/replace loc ;; will burrow in
+                         (collapse-cloze expr))
+                       loc)))))]
+    (->> expr
+      expr-zip
+      (iterate step)
+      (take *bail*) ;; bit clunki
+      (remove nil?)
+      last
+      zip/root)))
 
 ;; ============================================================
 ;; preliminary tests

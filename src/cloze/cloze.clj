@@ -207,12 +207,52 @@
 ;; recursively or whatever I guess. Might be getting a little anal
 ;; with the types, could make this accept both clozeurs and CtxNodes
 
-(def cw-log (atom []))
+
 
 (def ^:dynamic *bail* 1000)
 
+(def cclz-log (atom []))
+
+;; just one level
+(defn- collapse-cloze
+  ([clz]
+   (collapse-cloze clz {}))
+  ([clz ctx0]
+   (assert (clozeur? clz) "requires clozeur") ;; fix this, perhaps at collapse (above)
+   (let [bndgs (bindings clz)]
+      ;; seems like there should be a better way than looping over 2
+      ;; locs, but that would require thinking
+     (loop [prev-loc (ctx-zip ;; tricksy
+                       (CtxNode. ctx0 ;; riiight?
+                         (expression clz)))
+            loc (znext prev-loc)
+            i 0]
+       (swap! cclz-log conj loc)
+       (if (<= *bail* i)
+         (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
+         (if loc
+           (let [^CtxNode node (zip/node loc)
+                 ctx (.ctx node)
+                 expr (.expr node)
+                 bndgs2 (reduce dissoc bndgs (keys ctx))]
+             (recur
+               loc
+               (if-let [[_ expr2] (find bndgs2 expr)]
+                 (zu/zip-up-to-right ;; move OVER replacements
+                   (zip/replace loc (assoc node :expr expr2)))
+                 (znext loc))
+               (inc i)))
+           (let [^CtxNode r (zip/root prev-loc)
+                 res (minimize
+                       (put-expression clz (.expr r)))]
+             (swap! cw-log conj [:RESULT res])
+             res)))))))
+
+(def cw-log (atom []))
+
+;; NOT A GOOD POLICY. Variable capture.
 (defn- collapse-walk [clz]
-  (assert (clozeur? clz) "requires clozeur") ;; fix this
+  (assert (clozeur? clz) "requires clozeur") ;; fix this, perhaps at collapse (above)
   (let [bndgs (bindings clz)]
     (loop [loc (ctx-zip (CtxNode. {} (expression clz)))  ;tricksy
            i 0]

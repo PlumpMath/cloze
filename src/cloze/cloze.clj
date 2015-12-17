@@ -4,42 +4,42 @@
             [cloze.zip-utils :as zu]))
 
 ;; ============================================================
-;; clozeur
+;; cloze
 
 ;; no attempt to define polymorphic interface for now, but room to in
 ;; the future if that seems like a coolthing
 
-(declare collapse-walk expr-zip clozeur?)
+(declare collapse-walk expr-zip cloze?)
 
-(defrecord Clozeur [variables bindings expression])
+(defrecord Cloze [variables bindings expression])
 
 (defn collapse [expr]
   (collapse-walk-1 expr))
 
  ;; sloppy for now
-(defn collapse-all [expr] ;; need not be clozeur
+(defn collapse-all [expr] ;; need not be cloze
   (zip/root
     (zu/zip-prewalk (expr-zip expr)
-      #(if (clozeur? %) (collapse %) %))))
+      #(if (cloze? %) (collapse %) %))))
 
 ;; keeping static type stuff internal to fns for now, out of deference
 ;; to potential future polymorphism
 (defn bindings [clz]
-  (let [^Clozeur clz clz]
+  (let [^Cloze clz clz]
     (.bindings clz)))
 
 (defn variables [clz]
-  (let [^Clozeur clz clz]
+  (let [^Cloze clz clz]
     (.variables clz)))
 
 (defn expression [clz]
-  (let [^Clozeur clz clz]
+  (let [^Cloze clz clz]
     (.expression clz)))
 
 (defn put-bindings [clz bndgs]
   (assert ;; perhaps this should not be enforced
     (every? (variables clz) (keys bndgs))
-    (str "variables " (remove (variables clz) (keys bndgs)) " not in clozeur"))
+    (str "variables " (remove (variables clz) (keys bndgs)) " not in cloze"))
   (assoc clz :bindings bndgs))
 
 (defn put-variables [clz vs]
@@ -75,21 +75,21 @@
     (put-variables (dissoc (variables clz) v))))
 
 ;; this could get more elaborate
-(defn clozeur? [x]
-  (instance? Clozeur x))
+(defn cloze? [x]
+  (instance? Cloze x))
 
 (defn free [clz]
   (reduce dissoc
     (variables clz)
     (keys (bindings clz))))
 
-(defn clozeur
+(defn cloze
   ([variables expression]
-   (clozeur variables {} expression))
+   (cloze variables {} expression))
   ([variables bindings expression]
    (let [v (into variables (keys bindings))]
      (assert (set? v)) 
-     (Clozeur. v
+     (Cloze. v
        bindings
        expression))))
 
@@ -99,13 +99,13 @@
 ;; TODO: polymorphic version
 
 (defn- expr-branch? [x]
-  (or (coll? x) (clozeur? x)))
+  (or (coll? x) (cloze? x)))
 
 (defn- expr-children [x]
   (cond
-    (clozeur? x) (list (variables x) (bindings x) (expression x)) ;; meh maybe should do it more map-like
+    (cloze? x) (list (variables x) (bindings x) (expression x)) ;; meh maybe should do it more map-like
     (coll? x) (seq x) ;; should be seqable or something
-    :else (throw (Exception. "requires either standard clojure collection or clozeur"))))
+    :else (throw (Exception. "requires either standard clojure collection or cloze"))))
 
 (defn- list-like? [x]
   (or (seq? x) (instance? clojure.lang.MapEntry x)))
@@ -113,14 +113,14 @@
 (defn- expr-make-node [x kids]
   (cond
     (list-like? x) (with-meta (into (empty x) (reverse kids)) (meta x))
-    (clozeur? x) (let [[vs bndgs expr] kids]
+    (cloze? x) (let [[vs bndgs expr] kids]
                    (-> x
                      (put-variables vs)
                      (put-bindings bndgs)
                      (put-expression expr)
                      (with-meta (meta x))))
     (coll? x) (with-meta (into (empty x) kids) (meta x))
-    :else (throw (Exception. "requires either standard clojure collection or clozeur"))))
+    :else (throw (Exception. "requires either standard clojure collection or cloze"))))
 
 (defn expr-zip [x]
   (zip/zipper
@@ -147,7 +147,7 @@
   (cast CtxNode node)
   (let [ctx (.ctx node)
         expr (.expr node)
-        children-ctx (if (clozeur? expr)
+        children-ctx (if (cloze? expr)
                        (merge ctx (bindings expr))
                        ctx)]
     (for [cexpr (expr-children expr)]
@@ -173,13 +173,13 @@
     ctx-node))
 
 ;; following runs right into variable capturing awkwardness. Can deal
-;; with it in the obvious ways - rewrite subclozeurs with gensyms, or
+;; with it in the obvious ways - rewrite subclozes with gensyms, or
 ;; just capture the variables because that's what you're doing
 (defn absorb [clz]
   (loop [loc (expr-zip (expression clz)), clzs '()]
     (if-let [nxt (znext loc)]
       (let [nd (zip/node nxt)]
-        (if (clozeur? nd)
+        (if (cloze? nd)
           (recur
             (zu/zip-up-to-right (zip/replace nxt (expression clz)))
             (conj clzs nxt))
@@ -192,12 +192,12 @@
 
 (defn minimize
   "Let res be clz with all its bound variables removed. If res has no
-  free variables, minimize-clozeur returns (expression clz), otherwise
+  free variables, minimize-cloze returns (expression clz), otherwise
   returns res. Does not do replacement, so if clz has variables bound
   but not yet replaced in (expression clz) they will effectively
   become open symbols; to avoid this, use collapse instead."
   [clz]
-  (assert (clozeur? clz) "requires clozeur")
+  (assert (cloze? clz) "requires cloze")
   (let [vs2 (reduce disj
               (variables clz)
               (keys (bindings clz)))]
@@ -217,7 +217,7 @@
 ;; public or private? hm
 ;; just collapses the current clz. for collapse-all, use this
 ;; recursively or whatever I guess. Might be getting a little anal
-;; with the types, could make this accept both clozeurs and CtxNodes
+;; with the types, could make this accept both clozes and CtxNodes
 
 
 ;; should be imperatively setting this during rewrite stages below; am not.
@@ -232,7 +232,7 @@
   ([clz]
    (collapse-cloze clz {}))
   ([clz ctx0]
-   (assert (clozeur? clz) "requires clozeur") ;; fix this, perhaps at collapse (above)
+   (assert (cloze? clz) "requires cloze") ;; fix this, perhaps at collapse (above)
    (let [bndgs (bindings clz)]
      (loop [prev-loc (ctx-zip ;; tricksy
                        (CtxNode. ctx0 ;; riiight?
@@ -260,7 +260,7 @@
       (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
       (if loc
         (let [expr (zip/node loc)]
-          (if (clozeur? expr)
+          (if (cloze? expr)
             (let [loc2 (zip/replace loc
                          (bail-up i (collapse-cloze expr)))]
               (recur loc2 (zu/zip-up-to-right loc2) (inc i)))
@@ -279,7 +279,7 @@
           (let [expr (zip/node loc)]
             (recur loc
               (znext
-                (if (clozeur? expr)
+                (if (cloze? expr)
                   (zip/replace loc
                     (bail-up i (collapse-cloze expr)))
                   loc))
@@ -303,7 +303,7 @@
 
 (comment
   (t/deftest test-collapse
-    (let [clz1 (clozeur '#{a b x}
+    (let [clz1 (cloze '#{a b x}
                  '(fn [x]
                     (when a b)))]
       (t/is (= (collapse

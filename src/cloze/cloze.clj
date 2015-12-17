@@ -3,6 +3,8 @@
             [clojure.test :as t]
             [cloze.zip-utils :as zu]))
 
+(declare collapse-walk-1)
+
 ;; ============================================================
 ;; cloze
 

@@ -16,6 +16,15 @@
         y
         (recur y)))))
 
+(defn- fixpoint-vec [f x]
+  (persistent!
+    (loop [bldg (transient [x])
+           x x]
+      (let [y (f x)]
+        (if (= y x)
+          bldg
+          (recur (conj! bldg y) y))))))
+
 ;; ============================================================
 ;; cloze
 
@@ -186,6 +195,26 @@
 
 
 ;; ============================================================
+;; sugar
+
+;; unlike let, bindings can't see previous bindings! because it turns into a map.
+;; we can change this by iterating clozes, but it would be a headache to manipulate that data.
+;; hm. maybe we should think about that more.
+;; well we do have update-expr-in... still kind of annoying. Hm hm hm.
+;; might be a use-case for collapse-walk-deep? or some variant
+;; then could make form of collapse polymorphic on some cloze type or something
+
+
+;; quoting vs not quoting thing here is annoying, this macro needs work
+(defmacro cloze-let [bndgs frm]
+  (let [qbndgs (apply hash-map
+                 (interleave
+                   (map #(list 'quote %)
+                     (take-nth 2 bndgs))
+                   (take-nth 2 (rest bndgs))))]
+    `(cloze nil ~qbndgs ~frm))) ;; frm not quoted so we can nest clozes better
+
+;; ============================================================
 ;; expr-zip
 
 ;; TODO: polymorphic version
@@ -207,6 +236,8 @@
         (list-like? x) (into (empty x) (reverse kids))
         (cloze? x) (let [[vs bndgs expr] kids]
                      (Cloze. vs bndgs expr))
+         ;; WISH you didn't have to do this shit with maps, is total bullshit:
+        (map? x) (into (empty x) (map vec kids))
         (coll? x) (into (empty x) kids)
         :else (throw (Exception. "requires either standard clojure collection or cloze")))
     (with-meta (meta x))))
@@ -279,7 +310,7 @@
 
  ;; sloppy for now
 (defn collapse-all [expr] ;; need not be cloze
-u  (zip/root
+  (zip/root
     (zu/zip-prewalk (expr-zip expr)
       #(if (cloze? %) (collapse %) %))))
 
@@ -294,7 +325,7 @@ u  (zip/root
 
 ;; following runs right into variable capturing awkwardness. Can deal
 ;; with it in the obvious ways - rewrite subclozes with gensyms, or
-o;; just capture the variables because that's what you're doing
+;; just capture the variables because that's what you're doing
 (defn absorb [clz]
   (loop [loc (expr-zip (expr clz)), clzs '()]
     (if-let [nxt (znext loc)]
@@ -347,6 +378,9 @@ o;; just capture the variables because that's what you're doing
   `(clojure.core/binding [*bail* (when *bail* (+ *bail* ~i))]
      ~@body))
 
+;; given behavior of zip/end? etc (as noted near walk-loc), not sure
+;; at all that znext is right way to do this
+
 ;; just one level
 (defn collapse-cloze
   ([clz]
@@ -357,7 +391,7 @@ o;; just capture the variables because that's what you're doing
      (loop [prev-loc (ctx-zip ;; tricksy
                        (CtxNode. ctx0 ;; riiight?
                          (expr clz)))
-            loc (znext prev-loc)
+            loc prev-loc ;;(znext prev-loc)
             i 0]
        (if (and *bail* (<= *bail* i))
          (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))

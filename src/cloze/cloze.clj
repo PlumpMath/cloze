@@ -264,7 +264,7 @@
 
 ;; check order of the following
 (defn- ctx-zip [^CtxNode ctx-node]
-  (assert (instance? CtxNode ctx-node))
+   (assert (instance? CtxNode ctx-node))
   (zip/zipper
     ctx-branch?
     ctx-children
@@ -279,7 +279,7 @@
 
  ;; sloppy for now
 (defn collapse-all [expr] ;; need not be cloze
-  (zip/root
+u  (zip/root
     (zu/zip-prewalk (expr-zip expr)
       #(if (cloze? %) (collapse %) %))))
 
@@ -294,7 +294,7 @@
 
 ;; following runs right into variable capturing awkwardness. Can deal
 ;; with it in the obvious ways - rewrite subclozes with gensyms, or
-;; just capture the variables because that's what you're doing
+o;; just capture the variables because that's what you're doing
 (defn absorb [clz]
   (loop [loc (expr-zip (expr clz)), clzs '()]
     (if-let [nxt (znext loc)]
@@ -419,12 +419,17 @@
 ;; not necessary for Cloze templates; more related to expression zipper
 
 ;; step fn gets fed locs
+;; seems that there's something important about the last loc (for
+;; which zip/end? is true), such that some algorithms (such as
+;; expand-splices) don't work if you just take up UNTIL you hit the
+;; last loc, ie with (take-while (complement zip/end?)), which I had
+;; been using. Might explain some of the trouble I've been having.
 (defn walk-loc [loc step-fn]
-  (->> loc
-    (iterate step-fn)
-    (take-while (complement zip/end?))
-    last
-    zip/root))
+  (loop [loc loc]
+    (let [loc2 (step-fn loc)]
+      (if (zip/end? loc2)
+        (zip/root loc2)
+        (recur loc2)))))
 
 ;; step-fn gets fed nodes rather than locs; like clojure.walk/prewalk,
 ;; but preserves metadata
@@ -446,7 +451,7 @@
   (when-let [loc2 (zip/down loc)]
     (->> loc2
       (iterate zip/right)
-      (remove nil?))))
+      (take-while identity))))
 
 ;; or something
 (defrecord Splice [args])
@@ -458,14 +463,34 @@
   (instance? Splice x))
 
 (defn expand-splices [expr]
-  (walk-loc (expr-zip expr)
-    (fn step [loc]
-      (zip/next
-        (if (splice? (zip/node loc))
-          (->> (loc-children loc)
-            (map #(walk-loc % step))
-            (reduce zip/insert-left loc))
-          loc)))))
+  (if (splice? expr)
+    (:args expr)
+    (walk-loc (expr-zip expr)
+      (fn step [loc]
+        (zip/next
+          (if (splice? (zip/node loc))
+            (->> (:args (zip/node loc))
+              expand-splices
+              (reduce zip/insert-left loc)
+              zip/remove)
+            loc))))))
+
+;; can't even splice into a map with backtick:
+;; (let [kvs [1 2 3 4]]
+;;   `{~@kvs})
+
+;; so instead for that sort of thing perhaps use:
+;; (let [kvs [1 2 3 4]]
+;;   `(hash-map ~@kvs))
+
+;; if a map literal is needed for syntax, though, we could
+;; write a spliceable-map term:
+
+;; (expand-splices
+;;   (spliceable-map :a :b (splice :c :d)))
+;; =>
+;; {:a :b :c :d}
+
 
 ;; ============================================================
 ;; preliminary tests
@@ -533,3 +558,10 @@
          (cloze nil '{a A b B}
            (cloze nil '{a AA} '[a b])))
       '[AA B])))
+
+;; finesse
+(t/deftest test-splices
+  (t/is
+    (= (expand-splices
+         ['a (splice 1 2 3) 'b])
+      ['a 1 2 3 'b])))

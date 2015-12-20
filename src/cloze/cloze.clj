@@ -40,7 +40,8 @@
    (cloze variables {} expression))
   ([variables bindings expression]
    (Cloze. (ensure-set variables)
-     bindings expression)))
+     (or bindings {})
+     expression)))
 
 (defn cloze? [x]
   (instance? Cloze x))

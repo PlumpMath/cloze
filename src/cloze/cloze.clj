@@ -494,6 +494,9 @@
 (defn splice [& xs]
   (Splice. xs))
 
+(defn coll-splice [xs]
+  (Splice. (vec xs)))
+
 (defn splice? [x]
   (instance? Splice x))
 

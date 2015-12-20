@@ -194,6 +194,17 @@
 ;; (defn merge-bindings [clz1 clz2])
 ;; (defn merge-clz [clz1 clz2])
 
+;; maybe redefine this for exprs generally
+(defn binding-paths [x]
+  (when (cloze? x)
+    (let [m (bindings x)]
+      (mapcat (fn [k]
+                (or
+                  (seq
+                    (map #(cons k %)
+                      (binding-paths (m k))))
+                  (list (list k))))
+        (keys m)))))
 
 ;; ============================================================
 ;; sugar

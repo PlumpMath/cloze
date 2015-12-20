@@ -614,3 +614,52 @@
     (= (expand-splices
          ['a (splice 1 2 3) 'b])
       ['a 1 2 3 'b])))
+
+
+;; ============================================================
+;; fun
+
+;; splice should maybe take a coll rather than n-args; at least,
+;; something should, because otherwise annoying to rewrite into a
+;; splice. maybe.
+
+(comment
+  (let [template (cloze '#{spec iss} nil
+                   ;; {'spec (gensym "spec_")
+                   ;;  'iss (gensym "initialized-spec-sym_")}
+                   (cloze nil
+                     {'initialized-spec 'iss
+                      'let-bindings-1 (cloze nil
+                                        {'iss-val '(oodlewoodle spec)}
+                                        ['iss 'iss-val])
+                      'reductioneer '(fn [subspec]
+                                       (case subspec
+                                         :hi 0 
+                                         :there 1 
+                                         :marty 2
+                                         (throw Exception. "not really marty")))}
+                     '(fn [spec]
+                        (let let-bindings-1
+                          (reduce reductioneer
+                            initialized-spec
+                            spec-subspecs)))))]
+    (pprint
+      (expand-splices
+        (collapse-walk-deep
+          (-> template
+            (assoc-in '[:bindings spec] 'hispec)
+            (assoc-in '[:expr :bindings let-bindings-1 :bindings iss-val]
+              ["maaarty" 'spec
+               (coll-splice
+                 (interleave
+                   '[a b c]
+                   (range)))])))))))
+
+;; oooooo can have a function that walks the whole thing looking for
+;; shadowed, unbound variables at the end and replacing them with
+;; consistent gensyms so we do the gensym dance AT THE END
+;; !!!AAAAAAAAA!!!
+;; and ya should probably have a key-rename function for clozes too
+
+
+

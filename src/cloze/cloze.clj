@@ -187,8 +187,6 @@
   ([clz ks f & args]
    (update-expr-in clz ks #(apply f % args) ks)))
 
-(defn update-expr-in [clz [k & ks] expr])
-
 ;; is this actually important?
 ;; (defn merge-vs [clz1 clz2])
 ;; (defn merge-bindings [clz1 clz2])

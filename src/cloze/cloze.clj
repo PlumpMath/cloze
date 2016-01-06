@@ -572,6 +572,44 @@
 
 
 ;; ============================================================
+;; miracle of merge
+
+(defn deep-merge
+  ([] nil)
+  ([a] a)
+  ([a b]
+   (cond
+     (nil? b) a ;; contentious
+     
+     (cloze? a)
+     (if (cloze? b)
+       (cloze
+         (deep-merge (vs a) (vs b))
+         (deep-merge (bindings a) (bindings b))
+         (deep-merge (expr a) (expr b)))
+       b)
+
+     (map? a)
+     (if (map? b)
+       (reduce-kv (fn [m k v]
+                    (assoc m k
+                      (if-let [e (find m k)]
+                        (deep-merge v (val e))
+                        v)))
+         a b)
+       b)
+
+     (set? a)
+     (if (set? b)
+       (into a b)
+       b)
+
+     :else b))
+  ([a b & cs]
+   (reduce deep-merge (deep-merge a b) cs)))
+
+
+;; ============================================================
 ;; preliminary tests
 
 (t/deftest test-collapse

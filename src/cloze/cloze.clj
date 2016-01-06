@@ -481,9 +481,11 @@
 (defn walk-loc [loc step-fn]
   (loop [loc loc]
     (let [loc2 (step-fn loc)]
-      (if (zip/end? loc2)
-        (zip/root loc2)
-        (recur loc2)))))
+      (if loc2
+        (if (zip/end? loc2)
+          (zip/root loc2)
+          (recur loc2))
+        (zip/root loc)))))
 
 ;; step-fn gets fed nodes rather than locs; like clojure.walk/prewalk,
 ;; but preserves metadata

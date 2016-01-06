@@ -533,7 +533,7 @@
 (defrecord Splice [args])
 
 (defn splice [& xs]
-  (Splice. xs))
+  (Splice. (vec xs)))
 
 (defn coll-splice [xs]
   (Splice. (vec xs)))

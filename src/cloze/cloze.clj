@@ -495,6 +495,26 @@
       (zip/next
         (zip/edit loc step-fn)))))
 
+;; names are so fun
+(defn zupple [loc]
+  (or (zu/zip-up-to-right loc)
+    [(zip/root loc) :end]))
+
+;; like mathematica, except worse
+(defn replace-all [expr & pred-fns]
+  (let [pfs (vec (partition 2 pred-fns))]
+    (walk-loc (expr-zip expr)
+      (fn [loc]
+        (let [node (zip/node loc)]
+          (loop [i 0]
+            (if (< i (count pfs))
+              (let [[p f] (pfs i)]
+                (if (p node)
+                  (zupple
+                    (zip/edit loc f))
+                  (recur (inc i))))
+              (zip/next loc))))))))
+
 ;; removes clozes. find better name?
 (defn scrub [expr]
   (walk-expression expr

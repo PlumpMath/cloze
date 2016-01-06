@@ -204,6 +204,16 @@
                   (list (list k))))
         (keys m)))))
 
+(defn cloze-paths [x]
+  (when (or (map? x) (cloze? x))
+    (mapcat (fn [k]
+              (or
+                (seq
+                  (map #(cons k %)
+                    (cloze-paths (get x k))))
+                (list (list k))))
+      (keys x))))
+
 ;; ============================================================
 ;; sugar
 

@@ -194,8 +194,8 @@
 
 ;; maybe redefine this for exprs generally
 (defn binding-paths [x]
-  (when (clz/cloze? x)
-    (let [bndgs (clz/bindings x)]
+  (when (cloze? x)
+    (let [bndgs (bindings x)]
       (mapcat (fn [k]
                 (map #(cons k %)
                   (or (binding-paths (bndgs k)) '(()))))

@@ -1,5 +1,8 @@
 (ns cloze.traversal)
 
+;; ============================================================
+;; basic traversals
+
 (defn prewalk [x f leaf? children make-node]
   (let [y (f x)]
     (if (leaf? y)
@@ -23,3 +26,18 @@
       (make-node x
         (map #(postwalk % f leaf? children make-node)
           (children x))))))
+
+;; ============================================================
+;; closures
+
+(defn prewalk-fn [leaf? children make-node]
+  (fn [x f]
+    (prewalk x f leaf? children make-node)))
+
+(defn prewalk-shallow-fn [leaf? children make-node]
+  (fn [x p f]
+    (prewalk-shallow x p f leaf? children make-node)))
+
+(defn postwalk-fn [leaf? children make-node]
+  (fn [x f]
+    (postwalk x f leaf? children make-node)))

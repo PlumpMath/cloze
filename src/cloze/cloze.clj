@@ -238,6 +238,8 @@
 ;; expr-zip
 
 ;; TODO: polymorphic version
+(declare splice? coll-splice)
+;; I mean this is just stupid ^
 
 (defn- expr-branch? [x]
   (or (coll? x) (cloze? x)))
@@ -245,6 +247,7 @@
 (defn- expr-children [x]
   (cond
     (cloze? x) (list (vs x) (bindings x) (expr x))
+    (splice? x) (:args x)
     (coll? x) (seq x) ;; should be seqable or something
     :else (throw (Exception. "requires either standard clojure collection or cloze"))))
 
@@ -256,7 +259,8 @@
         (list-like? x) (into (empty x) (reverse kids))
         (cloze? x) (let [[vs bndgs expr] kids]
                      (Cloze. vs bndgs expr))
-         ;; WISH you didn't have to do this shit with maps, is total bullshit:
+        (splice? x) (coll-splice kids) ;; yep need multimethod or something
+        ;; WISH you didn't have to do this shit with maps, is total bullshit:
         (map? x) (into (empty x) (map vec kids))
         (coll? x) (into (empty x) kids)
         :else (throw (Exception. "requires either standard clojure collection or cloze")))

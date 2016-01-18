@@ -194,15 +194,12 @@
 
 ;; maybe redefine this for exprs generally
 (defn binding-paths [x]
-  (when (cloze? x)
-    (let [m (bindings x)]
+  (when (clz/cloze? x)
+    (let [bndgs (clz/bindings x)]
       (mapcat (fn [k]
-                (or
-                  (seq
-                    (map #(cons k %)
-                      (binding-paths (m k))))
-                  (list (list k))))
-        (keys m)))))
+                (map #(cons k %)
+                  (or (binding-paths (bndgs k)) '(()))))
+        (keys bndgs)))))
 
 (defn cloze-paths [x]
   (when (or (map? x) (cloze? x))

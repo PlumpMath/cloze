@@ -2,7 +2,8 @@
   (:refer-clojure :exclude [bound?])
   (:require [clojure.zip :as zip]
             [clojure.test :as t]
-            [cloze.zip-utils :as zu]))
+            [cloze.zip-utils :as zu]
+            [cloze.traversal :as trv]))
 
 (declare collapse-walk-1)
 
@@ -379,19 +380,6 @@
         (put-bindings {})
         (put-vs vs2)))))
 
-;; punt on specifics of polymorphism for now; can always back out of
-;; the following. (could wrap it up in another level of indirection if
-;; you're really being paranoid but probably no reason. Especially
-;; since this stuff is going to be in an internal namespace for a
-;; moment, and anyway you can always hoist the function signature if
-;; you really want that sort of crap).
-
-;; public or private? hm
-;; just collapses the current clz. for collapse-all, use this
-;; recursively or whatever I guess. Might be getting a little anal
-;; with the types, could make this accept both clozes and CtxNodes
-
-
 ;; should be imperatively setting this during rewrite stages below; am not.
 (def ^:dynamic *bail* 1000)
 
@@ -409,58 +397,39 @@
   ([clz ctx0]
    (assert (cloze? clz) "requires cloze") ;; fix this, perhaps at collapse (above)
    (let [bndgs (bindings clz)]
-     (loop [prev-loc (ctx-zip ;; tricksy
-                       (CtxNode. ctx0 ;; riiight?
-                         (expr clz)))
-            loc prev-loc ;;(znext prev-loc)
-            i 0]
-       (if (and *bail* (<= *bail* i))
-         (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
-         (if loc
-           (let [^CtxNode node (zip/node loc)]
-             (if-let [[_ expr2] (and
-                                  (not (shadowed? node (.expr node)))
-                                  (find bndgs (.expr node)))]
-               (let [loc2 (zip/replace loc (assoc node :expr expr2))]
-                 (recur loc2 (zu/zip-up-to-right loc2) (inc i)))
-               (recur loc (znext loc) (inc i))))
-           (let [^CtxNode r (zip/root prev-loc)]
-             (minimize (put-expr clz (.expr r)))) ))))))
+     (trv/prewalk-shallow
+       (CtxNode. ctx0 (expr clz))
+       (fn match? [^CtxNode node]
+         (and
+           (not (shadowed? node (.expr node)))
+           (find bndgs (.expr node))))
+       (fn replace [^CtxNode node]
+         (get bndgs (.expr node)))
+       ctx-branch?
+       ctx-children
+       ctx-make-node))))
 
 ;; will NOT burrow into replacements
 (defn collapse-walk-1 [expr]
-  (loop [prev-loc nil
-         loc (expr-zip expr)
-         i 0]
-    (if (and *bail* (<= *bail* i))
-      (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
-      (if loc
-        (let [expr (zip/node loc)]
-          (if (cloze? expr)
-            (let [loc2 (zip/replace loc
-                         (bail-up i (collapse-cloze expr)))]
-              (recur loc2 (zu/zip-up-to-right loc2) (inc i)))
-            (recur loc (znext loc) (inc i))))
-        (zip/root prev-loc)))))
+  (trv/prewalk-shallow
+    expr
+    cloze?
+    collapse-cloze
+    expr-branch?
+    expr-children
+    expr-make-node))
 
  ;; WILL burrow into replacements; rather dangerous
 (defn collapse-walk-deep [expr]
-  (zip/root
-    (loop [prev-loc nil
-           loc (expr-zip expr)
-           i 0]
-      (if (and *bail* (<= *bail* i))
-        (throw (Exception. (str  "reached max iterations, *bail* = " *bail*)))
-        (if loc
-          (let [expr (zip/node loc)]
-            (recur loc
-              (znext
-                (if (cloze? expr)
-                  (zip/replace loc
-                    (bail-up i (collapse-cloze expr)))
-                  loc))
-              (inc i)))
-          prev-loc)))))
+  (trv/prewalk
+    expr
+    (fn step [x]
+      (if (cloze? x)
+        (collapse-cloze x)
+        x))
+    expr-branch?
+    expr-children
+    expr-make-node))
 
 ;; like mathematica's replace-all-repeated. goes to fixpoint. not
 ;; cheap, and might not terminate, but the best.

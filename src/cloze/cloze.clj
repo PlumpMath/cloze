@@ -238,20 +238,20 @@
 (declare splice? coll-splice)
 ;; I mean this is just stupid ^
 
-(defn- expr-branch? [x]
+(defn expr-branch? [x]
   (or (coll? x) (cloze? x)))
 
-(defn- expr-children [x]
+(defn expr-children [x]
   (cond
     (cloze? x) (list (vs x) (bindings x) (expr x))
     (splice? x) (:args x)
     (coll? x) (seq x) ;; should be seqable or something
     :else (throw (Exception. "requires either standard clojure collection or cloze"))))
 
-(defn- list-like? [x]
+(defn list-like? [x]
   (or (seq? x) (instance? clojure.lang.MapEntry x)))
 
-(defn- expr-make-node [x kids]
+(defn expr-make-node [x kids]
   (-> (cond
         (list-like? x) (into (empty x) (reverse kids))
         (cloze? x) (let [[vs bndgs expr] kids]

@@ -345,23 +345,20 @@
     (vs clz)
     (keys (bindings clz))))
 
-;; following runs right into variable capturing awkwardness. Can deal
-;; with it in the obvious ways - rewrite subclozes with gensyms, or
-;; just capture the variables because that's what you're doing
 (defn absorb [clz]
-  (loop [loc (expr-zip (expr clz)), clzs '()]
-    (if-let [nxt (znext loc)]
-      (let [nd (zip/node nxt)]
-        (if (cloze? nd)
-          (recur
-            (zu/zip-up-to-right (zip/replace nxt (expr clz)))
-            (conj clzs nxt))
-          (recur nxt clzs)))
+  (loop [loc (expr-zip (expr clz)), clzs []]
+    (if (zip/end? loc)
       (let [expr (zip/root loc)]
         (-> clz
           (put-expr expr)
-          (put-vs (into (vs clz) (map vs clzs)))
-          (put-bindings (into (bindings clz) (map bindings clzs))))))))
+          (put-vs (reduce into (vs clz) (map vs clzs)))
+          (put-bindings (into (bindings clz) (map bindings clzs)))))
+      (let [nd (zip/node loc)]
+        (if (cloze? nd)
+          (recur
+            (zupple (zip/replace loc (expr nd)))
+            (conj clzs nd))
+          (recur (zip/next loc) clzs))))))
 
 (defn minimize
   "Let res be clz with all its bound variables removed. If res has no
@@ -381,6 +378,7 @@
         (put-vs vs2)))))
 
 ;; should be imperatively setting this during rewrite stages below; am not.
+;; not currently used!
 (def ^:dynamic *bail* 1000)
 
 (defmacro bail-up [i & body]
@@ -389,6 +387,9 @@
 
 ;; given behavior of zip/end? etc (as noted near walk-loc), not sure
 ;; at all that znext is right way to do this
+
+;; ============================================================
+;; core transformation functions
 
 ;; just one level
 (defn collapse-cloze
@@ -466,7 +467,7 @@
         (zip/edit loc step-fn)))))
 
 ;; names are so fun
-(defn zupple [loc]
+(defn- zupple [loc]
   (or (zu/zip-up-to-right loc)
     [(zip/root loc) :end]))
 

@@ -332,9 +332,7 @@
 
  ;; sloppy for now
 (defn collapse-all [expr] ;; need not be cloze
-  (zip/root
-    (zu/zip-prewalk (expr-zip expr)
-      #(if (cloze? %) (collapse %) %))))
+  (collapse-walk-repeated expr))
 
 ;; this could get more elaborate
 (defn cloze? [x]
@@ -391,14 +389,49 @@
 ;; ============================================================
 ;; core transformation functions
 
+(defn ctx-branch-fn [expr-branch?]
+  (fn [^CtxNode node]
+    (expr-branch? (.expr node))))
+
+(defn ctx-children-fn [expr-children]
+  (fn [^CtxNode node]
+    (let [ctx (.ctx node)
+          expr (.expr node)
+          children-ctx (if (cloze? expr)
+                         (into ctx (scope expr)) ;; entire scope, not just bindings
+                         ctx)]
+      (seq
+        (for [cexpr (expr-children expr)]
+          (CtxNode. children-ctx cexpr))))))
+
+(defn ctx-make-node-fn [expr-make-node]
+  (fn [^CtxNode node kids]
+    (CtxNode.
+      (.ctx node)
+      (expr-make-node (.expr node)
+        (for [^CtxNode node2 kids]
+          (.expr node2))))))
+
+(defmacro ^:private traversaler [& args]
+  (let [[expr-branch? expr-children expr-make-nod] (take-last 3 args)]
+    `(~@(take (- (count args) 3) args)
+      (ctx-branch-fn ~expr-branch?)
+      (ctx-children-fn  ~expr-children)
+      (ctx-make-node-fn ~expr-make-node))))
+
 ;; just one level
 (defn collapse-cloze
   ([clz]
    (collapse-cloze clz #{}))
-  ([clz ctx0]
+  ([clz ctx]
+   (collapse-cloze clz #{}
+     expr-branch? expr-children expr-make-node))
+  ([clz ctx0
+    expr-branch? expr-children expr-make-node]
    (assert (cloze? clz) "requires cloze") ;; fix this, perhaps at collapse (above)
    (let [bndgs (bindings clz)]
-     (trv/prewalk-shallow
+     (traversaler
+       trv/prewalk-shallow
        (CtxNode. ctx0 (expr clz))
        (fn match? [^CtxNode node]
          (and
@@ -406,36 +439,54 @@
            (find bndgs (.expr node))))
        (fn replace [^CtxNode node]
          (get bndgs (.expr node)))
-       ctx-branch?
-       ctx-children
-       ctx-make-node))))
+       expr-branch?
+       expr-children
+       expr-make-node))))
 
 ;; will NOT burrow into replacements
-(defn collapse-walk-1 [expr]
-  (trv/prewalk-shallow
-    expr
-    cloze?
-    collapse-cloze
-    expr-branch?
-    expr-children
-    expr-make-node))
+(defn collapse-walk-1
+  ([expr]
+   (collapse-walk-1 expr
+     expr-branch? expr-children expr-make-node))
+  ([expr expr-branch? expr-children expr-make-node]
+   (traversaler
+     trv/prewalk-shallow
+     expr
+     cloze?
+     collapse-cloze
+     expr-branch?
+     expr-children
+     expr-make-node)))
 
  ;; WILL burrow into replacements; rather dangerous
-(defn collapse-walk-deep [expr]
-  (trv/prewalk
-    expr
-    (fn step [x]
-      (if (cloze? x)
-        (collapse-cloze x)
-        x))
-    expr-branch?
-    expr-children
-    expr-make-node))
+(defn collapse-walk-deep
+  ([expr]
+   (collapse-walk-deep expr-branch? expr-children expr-make-node))
+  ([expr expr-branch? expr-children expr-make-node]
+   (traversaler
+     trv/prewalk
+     expr
+     (fn step [x]
+       (if (cloze? x)
+         (collapse-cloze x)
+         x))
+     expr-branch?
+     expr-children
+     expr-make-node)))
 
 ;; like mathematica's replace-all-repeated. goes to fixpoint. not
 ;; cheap, and might not terminate, but the best.
-(defn collapse-walk-repeated [expr]
-  (fixpoint collapse-walk-1 expr))
+(defn collapse-walk-repeated
+  ([expr]
+   (collapse-walk-repeated expr
+     expr-branch? expr-children expr-make-node))
+  ([expr
+    expr-branch? expr-children expr-make-node]
+   (fixpoint
+     (fn [x]
+       (collapse-walk-1 x
+         expr-branch? expr-children expr-make-node))
+     expr)))
 
 ;; guess there should also be a collapse-walk-deep-repeated?
 

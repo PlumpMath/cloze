@@ -269,12 +269,14 @@
         :else (throw (Exception. "requires either standard clojure collection or cloze")))
     (with-meta (meta x))))
 
-(defn expr-zip [x]
-  (zip/zipper
+(def expr-traverser
+  (trv/traverser
     expr-branch?
     expr-children
-    expr-make-node
-    x))
+    expr-make-node))
+
+(defn expr-zip [x]
+  (expr-zip x expr-traverser))
 
 ;; ============================================================
 ;; ctx-zip
@@ -314,27 +316,28 @@
         (for [^CtxNode node2 kids]
           (.expr node2))))))
 
-;; check order of the following
-(defn- ctx-zip
-  ([^CtxNode ctx-node]
-   (ctx-zip expr-branch? expr-children expr-make-node ctx-node))
-  ([expr-branch? expr-children expr-make-node ^CtxNode ctx-node]
-   (assert (instance? CtxNode ctx-node))
-   (zip/zipper
-     (ctx-branch-fn expr-branch?)
-     (ctx-children-fn expr-children)
-     (ctx-make-node-fn expr-make-node)
-     ctx-node)))
+(defn expr->ctx-traverser [expr-trav]
+  (trv/traverser
+    (ctx-branch-fn #(trv/branch? trav %))
+    (ctx-children-fn #(trv/children trav %))
+    (ctx-make-node-fn #(trv/make-node trav %))))
 
 ;; ============================================================
 ;; replacement
 
-(defn collapse [expr]
-  (collapse-walk-1 expr))
+(declare collapse-walk-1 collapse-walk-repeated)
 
- ;; sloppy for now
-(defn collapse-all [expr] ;; need not be cloze
-  (collapse-walk-repeated expr))
+(defn collapse
+  ([expr]
+   (collapse expr expr-traverser))
+  ([expr trav]
+   (collapse-walk-1 expr trav)))
+
+(defn collapse-all
+  ([expr]
+   (collapse-all expr expr-traverser))
+  ([expr trav]
+   (collapse-walk-repeated expr trav)))
 
 ;; this could get more elaborate
 (defn cloze? [x]
@@ -345,20 +348,23 @@
     (vs clz)
     (keys (bindings clz))))
 
-(defn absorb [clz]
-  (loop [loc (expr-zip (expr clz)), clzs []]
-    (if (zip/end? loc)
-      (let [expr (zip/root loc)]
-        (-> clz
-          (put-expr expr)
-          (put-vs (reduce into (vs clz) (map vs clzs)))
-          (put-bindings (into (bindings clz) (map bindings clzs)))))
-      (let [nd (zip/node loc)]
-        (if (cloze? nd)
-          (recur
-            (zupple (zip/replace loc (expr nd)))
-            (conj clzs nd))
-          (recur (zip/next loc) clzs))))))
+(defn absorb
+  ([clz]
+   (absorb clz expr-traverser))
+  ([clz trav]
+   (loop [loc (trv/traverser-zip (expr clz) trav), clzs []]
+     (if (zip/end? loc)
+       (let [expr (zip/root loc)]
+         (-> clz
+           (put-expr expr)
+           (put-vs (reduce into (vs clz) (map vs clzs)))
+           (put-bindings (into (bindings clz) (map bindings clzs)))))
+       (let [nd (zip/node loc)]
+         (if (cloze? nd)
+           (recur
+             (zupple (zip/replace loc (expr nd)))
+             (conj clzs nd))
+           (recur (zip/next loc) clzs)))))))
 
 (defn minimize
   "Let res be clz with all its bound variables removed. If res has no
@@ -380,12 +386,6 @@
 ;; ============================================================
 ;; core transformation functions
 
-(def expr-traverser
-  (trv/traverser
-    expr-branch?
-    expr-children
-    expr-make-node))
-
 ;; just one level
 ;; overloading on arg number to this extent is sort of stupid, should just make up mind whether to use ITraverser or what
 (defn collapse-cloze
@@ -405,9 +405,7 @@
              (find bndgs (.expr node))))
          (fn replace [^CtxNode node]
            (CtxNode. (.ctx node) (bndgs (.expr node))))
-         (ctx-branch-fn #(trv/branch? trav %))
-         (ctx-children-fn #(trv/children trav %))
-         (ctx-make-node-fn #(trv/make-node trav %)))))))
+         (expr->ctx-traverser trav))))))
 
 ;; will NOT burrow into replacements
 (defn collapse-walk-1
@@ -425,15 +423,7 @@
   ([expr]
    (collapse-walk-deep expr-traverser))
   ([expr trav]
-   (trv/prewalk
-     expr
-     (fn step [x]
-       (if (cloze? x)
-         (collapse-cloze x)
-         x))
-     expr-branch?
-     expr-children
-     expr-make-node)))
+   (trv/prewalk expr #(if (cloze? %) (collapse-cloze % trav) %) trav)))
 
 ;; like mathematica's replace-all-repeated. goes to fixpoint. not
 ;; cheap, and might not terminate, but the best.
@@ -441,10 +431,7 @@
   ([expr]
    (collapse-walk-repeated expr expr-traverser))
   ([expr trav]
-   (fixpoint
-     (fn [x]
-       (collapse-walk-1 x trav))
-     expr)))
+   (fixpoint #(collapse-walk-1 % trav) expr)))
 
 ;; guess there should also be a collapse-walk-deep-repeated?
 
@@ -703,6 +690,3 @@
 ;; consistent gensyms so we do the gensym dance AT THE END
 ;; !!!AAAAAAAAA!!!
 ;; and ya should probably have a key-rename function for clozes too
-
-
-

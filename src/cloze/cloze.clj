@@ -10,7 +10,7 @@
 (defn- ensure-set [x]
   (if (set? x) x (set x)))
 
-(defn- fixpoint [f x]
+(defn fixpoint [f x]
   (loop [x x]
     (let [y (f x)]
       (if (= y x)
@@ -315,29 +315,6 @@
         (for [^CtxNode node2 kids]
           (.expr node2))))))
 
-;; (defn ctx-branch? [^CtxNode node]
-;;   (expr-branch? (.expr node)))
-
-;; ;; defining this NOT as a higher-order zipper per se, because those are headaches
-;; (defn ctx-children [^CtxNode node]
-;;   (assert (instance? CtxNode node))
-;;   (let [ctx (.ctx node)
-;;         expr (.expr node)
-;;         children-ctx (if (cloze? expr)
-;;                        (into ctx (scope expr)) ;; entire scope, not just bindings
-;;                        ctx)]
-;;     (seq
-;;       (for [cexpr (expr-children expr)]
-;;         (CtxNode. children-ctx cexpr)))))
-
-;; (defn ctx-make-node [^CtxNode node, kids]
-;;   (assert (instance? CtxNode node))
-;;   (CtxNode.
-;;     (.ctx node)
-;;     (expr-make-node (.expr node)
-;;       (for [^CtxNode node2 kids]
-;;         (.expr node2)))))
-
 ;; check order of the following
 (defn- ctx-zip
   ([^CtxNode ctx-node]
@@ -415,7 +392,7 @@
 ;; ============================================================
 ;; core transformation functions
 
-(defmacro ^:private traversaler [& args]
+(defmacro traversaler [& args]
   (let [[expr-branch? expr-children expr-make-nod] (take-last 3 args)]
     `(~@(take (- (count args) 3) args)
       (ctx-branch-fn ~expr-branch?)
@@ -427,24 +404,24 @@
   ([clz]
    (collapse-cloze clz #{}))
   ([clz ctx]
-   (collapse-cloze clz #{}
+   (collapse-cloze clz ctx
      expr-branch? expr-children expr-make-node))
   ([clz ctx0
     expr-branch? expr-children expr-make-node]
    (assert (cloze? clz) "requires cloze") ;; fix this, perhaps at collapse (above)
    (let [bndgs (bindings clz)]
-     (traversaler
-       trv/prewalk-shallow
-       (CtxNode. ctx0 (expr clz))
-       (fn match? [^CtxNode node]
-         (and
-           (not (shadowed? node (.expr node)))
-           (find bndgs (.expr node))))
-       (fn replace [^CtxNode node]
-         (get bndgs (.expr node)))
-       expr-branch?
-       expr-children
-       expr-make-node))))
+     (.expr
+       (trv/prewalk-shallow
+         (CtxNode. (or ctx0 #{}) (expr clz))
+         (fn match [^CtxNode node]
+           (and
+             (not (shadowed? node (.expr node)))
+             (find bndgs (.expr node))))
+         (fn replace [^CtxNode node]
+           (CtxNode. (.ctx node) (bndgs (.expr node))))
+         (ctx-branch-fn expr-branch?)
+         (ctx-children-fn expr-children)
+         (ctx-make-node-fn expr-make-node))))))
 
 ;; will NOT burrow into replacements
 (defn collapse-walk-1
@@ -452,11 +429,10 @@
    (collapse-walk-1 expr
      expr-branch? expr-children expr-make-node))
   ([expr expr-branch? expr-children expr-make-node]
-   (traversaler
-     trv/prewalk-shallow
+   (trv/prewalk-shallow
      expr
      cloze?
-     collapse-cloze
+     #(collapse-cloze % nil expr-branch? expr-children expr-make-node)
      expr-branch?
      expr-children
      expr-make-node)))
@@ -466,8 +442,7 @@
   ([expr]
    (collapse-walk-deep expr-branch? expr-children expr-make-node))
   ([expr expr-branch? expr-children expr-make-node]
-   (traversaler
-     trv/prewalk
+   (trv/prewalk
      expr
      (fn step [x]
        (if (cloze? x)

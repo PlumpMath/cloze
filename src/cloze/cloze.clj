@@ -10,7 +10,7 @@
 (defn- ensure-set [x]
   (if (set? x) x (set x)))
 
-(defn fixpoint [f x]
+(defn- fixpoint [f x]
   (loop [x x]
     (let [y (f x)]
       (if (= y x)
@@ -25,6 +25,11 @@
         (if (= y x)
           bldg
           (recur (conj! bldg y) y))))))
+
+;; names are so fun
+(defn- zupple [loc]
+  (or (zu/zip-up-to-right loc)
+    [(zip/root loc) :end]))
 
 ;; ============================================================
 ;; cloze
@@ -274,12 +279,6 @@
 ;; ============================================================
 ;; ctx-zip
 
-;; should be in zip-utils
-(defn- znext [loc]
-  (let [nxt (zip/next loc)]
-    (when-not (zip/end? nxt)
-      nxt)))
-
 ;; looks a lot like a cloze
 ;; hmmmmmmmmmm
 ;; (defrecord CtxNode [vs bindings expr]) ;; <= might be a good idea, not doing it just yet
@@ -378,26 +377,8 @@
         (put-bindings {})
         (put-vs vs2)))))
 
-;; should be imperatively setting this during rewrite stages below; am not.
-;; not currently used!
-(def ^:dynamic *bail* 1000)
-
-(defmacro bail-up [i & body]
-  `(clojure.core/binding [*bail* (when *bail* (+ *bail* ~i))]
-     ~@body))
-
-;; given behavior of zip/end? etc (as noted near walk-loc), not sure
-;; at all that znext is right way to do this
-
 ;; ============================================================
 ;; core transformation functions
-
-(defmacro traversaler [& args]
-  (let [[expr-branch? expr-children expr-make-nod] (take-last 3 args)]
-    `(~@(take (- (count args) 3) args)
-      (ctx-branch-fn ~expr-branch?)
-      (ctx-children-fn  ~expr-children)
-      (ctx-make-node-fn ~expr-make-node))))
 
 ;; just one level
 (defn collapse-cloze
@@ -494,11 +475,6 @@
     (fn [loc]
       (zip/next
         (zip/edit loc step-fn)))))
-
-;; names are so fun
-(defn- zupple [loc]
-  (or (zu/zip-up-to-right loc)
-    [(zip/root loc) :end]))
 
 ;; like mathematica, except worse
 (defn replace-all [expr & pred-fns]

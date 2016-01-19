@@ -15,6 +15,16 @@
     (make-node [_ x kids] (make-node x kids))))
 
 ;; ============================================================
+;; zipper
+
+(defn traverser-zip [x trav]
+  (clojure.zip/zip
+    #(branch? trav %)
+    #(children trav %)
+    #(make-node trav %1 %2)
+    x))
+
+;; ============================================================
 ;; basic traversals
 
 (defn prewalk
@@ -52,3 +62,4 @@
        (make-node trav x
          (map #(postwalk % f trav)
            (children trav x)))))))
+

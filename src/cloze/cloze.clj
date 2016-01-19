@@ -380,16 +380,21 @@
 ;; ============================================================
 ;; core transformation functions
 
+(def expr-traverser
+  (trv/traverser
+    expr-branch?
+    expr-children
+    expr-make-node))
+
 ;; just one level
+;; overloading on arg number to this extent is sort of stupid, should just make up mind whether to use ITraverser or what
 (defn collapse-cloze
   ([clz]
    (collapse-cloze clz #{}))
   ([clz ctx]
-   (collapse-cloze clz ctx
-     expr-branch? expr-children expr-make-node))
-  ([clz ctx0
-    expr-branch? expr-children expr-make-node]
-   (assert (cloze? clz) "requires cloze") ;; fix this, perhaps at collapse (above)
+   (collapse-cloze clz ctx expr-traverser))
+  ([clz ctx0 trav]
+   (assert (cloze? clz) "requires cloze")
    (let [bndgs (bindings clz)]
      (.expr
        (trv/prewalk-shallow
@@ -400,29 +405,26 @@
              (find bndgs (.expr node))))
          (fn replace [^CtxNode node]
            (CtxNode. (.ctx node) (bndgs (.expr node))))
-         (ctx-branch-fn expr-branch?)
-         (ctx-children-fn expr-children)
-         (ctx-make-node-fn expr-make-node))))))
+         (ctx-branch-fn #(trv/branch? trav %))
+         (ctx-children-fn #(trv/children trav %))
+         (ctx-make-node-fn #(trv/make-node trav %)))))))
 
 ;; will NOT burrow into replacements
 (defn collapse-walk-1
   ([expr]
-   (collapse-walk-1 expr
-     expr-branch? expr-children expr-make-node))
-  ([expr expr-branch? expr-children expr-make-node]
+   (collapse-walk-1 expr expr-traverser))
+  ([expr trav]
    (trv/prewalk-shallow
      expr
      cloze?
-     #(collapse-cloze % nil expr-branch? expr-children expr-make-node)
-     expr-branch?
-     expr-children
-     expr-make-node)))
+     #(collapse-cloze % nil trav)
+     trav)))
 
  ;; WILL burrow into replacements; rather dangerous
 (defn collapse-walk-deep
   ([expr]
-   (collapse-walk-deep expr-branch? expr-children expr-make-node))
-  ([expr expr-branch? expr-children expr-make-node]
+   (collapse-walk-deep expr-traverser))
+  ([expr trav]
    (trv/prewalk
      expr
      (fn step [x]
@@ -437,14 +439,11 @@
 ;; cheap, and might not terminate, but the best.
 (defn collapse-walk-repeated
   ([expr]
-   (collapse-walk-repeated expr
-     expr-branch? expr-children expr-make-node))
-  ([expr
-    expr-branch? expr-children expr-make-node]
+   (collapse-walk-repeated expr expr-traverser))
+  ([expr trav]
    (fixpoint
      (fn [x]
-       (collapse-walk-1 x
-         expr-branch? expr-children expr-make-node))
+       (collapse-walk-1 x trav))
      expr)))
 
 ;; guess there should also be a collapse-walk-deep-repeated?

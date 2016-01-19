@@ -292,37 +292,63 @@
 (defn shadowed? [^CtxNode ctx-node, x]
   (contains? (.ctx ctx-node) x))
 
-(defn ctx-branch? [^CtxNode node]
-  (expr-branch? (.expr node)))
+(defn ctx-branch-fn [expr-branch?]
+  (fn [^CtxNode node]
+    (expr-branch? (.expr node))))
 
-;; defining this NOT as a higher-order zipper per se, because those are headaches
-(defn ctx-children [^CtxNode node]
-  (assert (instance? CtxNode node))
-  (let [ctx (.ctx node)
-        expr (.expr node)
-        children-ctx (if (cloze? expr)
-                       (into ctx (scope expr)) ;; entire scope, not just bindings
-                       ctx)]
-    (seq
-      (for [cexpr (expr-children expr)]
-        (CtxNode. children-ctx cexpr)))))
+(defn ctx-children-fn [expr-children]
+  (fn [^CtxNode node]
+    (let [ctx (.ctx node)
+          expr (.expr node)
+          children-ctx (if (cloze? expr)
+                         (into ctx (scope expr)) ;; entire scope, not just bindings
+                         ctx)]
+      (seq
+        (for [cexpr (expr-children expr)]
+          (CtxNode. children-ctx cexpr))))))
 
-(defn ctx-make-node [^CtxNode node, kids]
-  (assert (instance? CtxNode node))
-  (CtxNode.
-    (.ctx node)
-    (expr-make-node (.expr node)
-      (for [^CtxNode node2 kids]
-        (.expr node2)))))
+(defn ctx-make-node-fn [expr-make-node]
+  (fn [^CtxNode node kids]
+    (CtxNode.
+      (.ctx node)
+      (expr-make-node (.expr node)
+        (for [^CtxNode node2 kids]
+          (.expr node2))))))
+
+;; (defn ctx-branch? [^CtxNode node]
+;;   (expr-branch? (.expr node)))
+
+;; ;; defining this NOT as a higher-order zipper per se, because those are headaches
+;; (defn ctx-children [^CtxNode node]
+;;   (assert (instance? CtxNode node))
+;;   (let [ctx (.ctx node)
+;;         expr (.expr node)
+;;         children-ctx (if (cloze? expr)
+;;                        (into ctx (scope expr)) ;; entire scope, not just bindings
+;;                        ctx)]
+;;     (seq
+;;       (for [cexpr (expr-children expr)]
+;;         (CtxNode. children-ctx cexpr)))))
+
+;; (defn ctx-make-node [^CtxNode node, kids]
+;;   (assert (instance? CtxNode node))
+;;   (CtxNode.
+;;     (.ctx node)
+;;     (expr-make-node (.expr node)
+;;       (for [^CtxNode node2 kids]
+;;         (.expr node2)))))
 
 ;; check order of the following
-(defn- ctx-zip [^CtxNode ctx-node]
+(defn- ctx-zip
+  ([^CtxNode ctx-node]
+   (ctx-zip expr-branch? expr-children expr-make-node ctx-node))
+  ([expr-branch? expr-children expr-make-node ^CtxNode ctx-node]
    (assert (instance? CtxNode ctx-node))
-  (zip/zipper
-    ctx-branch?
-    ctx-children
-    ctx-make-node
-    ctx-node))
+   (zip/zipper
+     (ctx-branch-fn expr-branch?)
+     (ctx-children-fn expr-children)
+     (ctx-make-node-fn expr-make-node)
+     ctx-node)))
 
 ;; ============================================================
 ;; replacement
@@ -388,29 +414,6 @@
 
 ;; ============================================================
 ;; core transformation functions
-
-(defn ctx-branch-fn [expr-branch?]
-  (fn [^CtxNode node]
-    (expr-branch? (.expr node))))
-
-(defn ctx-children-fn [expr-children]
-  (fn [^CtxNode node]
-    (let [ctx (.ctx node)
-          expr (.expr node)
-          children-ctx (if (cloze? expr)
-                         (into ctx (scope expr)) ;; entire scope, not just bindings
-                         ctx)]
-      (seq
-        (for [cexpr (expr-children expr)]
-          (CtxNode. children-ctx cexpr))))))
-
-(defn ctx-make-node-fn [expr-make-node]
-  (fn [^CtxNode node kids]
-    (CtxNode.
-      (.ctx node)
-      (expr-make-node (.expr node)
-        (for [^CtxNode node2 kids]
-          (.expr node2))))))
 
 (defmacro ^:private traversaler [& args]
   (let [[expr-branch? expr-children expr-make-nod] (take-last 3 args)]

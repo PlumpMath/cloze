@@ -1,43 +1,54 @@
 (ns cloze.traversal)
 
 ;; ============================================================
-;; basic traversals
+;; traverser
 
-(defn prewalk [x f branch? children make-node]
-  (let [y (f x)]
-    (if (not (branch? y))
-      y
-      (make-node y
-        (map #(prewalk % f branch? children make-node)
-          (children y))))))
+(defprotocol ITraverser
+  (branch? [this x])
+  (children [this x])
+  (make-node [this x kids]))
 
-(defn prewalk-shallow [x p f branch? children make-node]
-  (cond
-    (p x) (f x)
-    (not (branch? x)) x
-    :else (make-node x
-            (map #(prewalk-shallow % p f branch? children make-node)
-              (children x)))))
-
-(defn postwalk [x f branch? children make-node]
-  (f
-    (if (not (branch? x))
-      x
-      (make-node x
-        (map #(postwalk % f branch? children make-node)
-          (children x))))))
+(defn traverser [branch? children make-node]
+  (reify ITraverser
+    (branch? [_ x] (branch? x))
+    (children [_ x] (children x))
+    (make-node [_ x kids] (make-node x kids))))
 
 ;; ============================================================
-;; closures
+;; basic traversals
 
-(defn prewalk-fn [branch? children make-node]
-  (fn [x f]
-    (prewalk x f branch? children make-node)))
+(defn prewalk
+  ([x f branch? children make-node]
+   (prewalk x f
+     (traverser branch? children make-node)))
+  ([x f trav]
+   (let [y (f x)]
+     (if (not (branch? trav y))
+       y
+       (make-node trav y
+         (map #(prewalk % f trav)
+           (children trav y)))))))
 
-(defn prewalk-shallow-fn [branch? children make-node]
-  (fn [x p f]
-    (prewalk-shallow x p f branch? children make-node)))
+(defn prewalk-shallow
+  ([x p f branch? children make-node]
+   (prewalk-shallow x p f
+     (traverser branch? children make-node)))
+  ([x p f trav]
+   (cond
+     (p x) (f x)
+     (not (branch? trav x)) x
+     :else (make-node trav x
+             (map #(prewalk-shallow % p f trav)
+               (children trav x))))))
 
-(defn postwalk-fn [branch? children make-node]
-  (fn [x f]
-    (postwalk x f branch? children make-node)))
+(defn postwalk
+  ([x f branch? children make-node]
+   (postwalk x f
+     (traverser branch? children make-node)))
+  ([x f trav]
+   (f
+     (if (not (branch? trav x))
+       x
+       (make-node trav x
+         (map #(postwalk % f trav)
+           (children trav x)))))))

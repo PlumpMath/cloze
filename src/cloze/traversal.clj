@@ -1,4 +1,5 @@
-(ns cloze.traversal)
+(ns cloze.traversal
+  (:require [clojure.zip]))
 
 ;; ============================================================
 ;; traverser
@@ -18,7 +19,7 @@
 ;; zipper
 
 (defn traverser-zip [x trav]
-  (clojure.zip/zip
+  (clojure.zip/zipper
     #(branch? trav %)
     #(children trav %)
     #(make-node trav %1 %2)

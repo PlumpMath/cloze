@@ -1,6 +1,7 @@
 (ns cloze.cloze
   (:refer-clojure :exclude [bound?])
   (:require [clojure.zip :as zip]
+            [clojure.set :as sets]
             [clojure.test :as t]
             [cloze.zip-utils :as zu]
             [cloze.traversal :as trv]))
@@ -26,43 +27,67 @@
           bldg
           (recur (conj! bldg y) y))))))
 
-;; names are so fun
-(defn- zupple [loc]
+(defn- zupend [loc]
   (or (zu/zip-up-to-right loc)
     [(zip/root loc) :end]))
 
 ;; ============================================================
 ;; cloze
 
-;; no attempt to define polymorphic interface for now, but room to in
-;; the future if that seems like a coolthing
+;; insert benchmark data here explaining why interface rather than protocol
 
 (declare collapse-walk expr-zip cloze?)
 
-(defrecord Cloze [vs bindings expr])
+(definterface ICloze
+  (make [vs bindings expr])
+  (vs [])
+  (bindings [])
+  (expr []))
+
+(defn make [^ICloze clz vs bindings expr]
+  (.make clz vs bindings expr))
+
+(defn vs [^ICloze clz]
+  (.vs clz))
+
+(defn bindings [^ICloze clz]
+  (.bindings clz))
+
+(defn expr [^ICloze clz]
+  (.expr clz))
+
+(declare cloze)
+
+(defrecord Cloze [vs bindings expr]
+  ICloze
+  (make [this vs bindings expr]
+    (cloze vs bindings expr))
+  (vs [_] vs)
+  (bindings [_] bindings)
+  (expr [_] expr))
 
 (defn cloze
-  ([variables expression]
-   (cloze variables {} expression))
+  ([bindings expression]
+   (cloze nil bindings expression))
   ([variables bindings expression]
    (Cloze. (ensure-set variables)
      (or bindings {})
      expression)))
 
 (defn cloze? [x]
-  (instance? Cloze x))
+  (instance? ICloze x))
 
 ;; ============================================================
 ;; cloze data API
 
-(defn vs [clz]
-  (.vs clz))
+;; (defn vs [clz]
+;;   (.vs clz))
 
-(defn bindings [clz]
-  (.bindings clz))
+;; (defn bindings [clz]
+;;   (.bindings clz))
 
-(defn expr [clz]
-  (.expr clz))
+;; (defn expr [clz]
+;;   (.expr clz))
 
 (defn get-binding [clz k]
   (get (bindings clz) k))
@@ -78,21 +103,20 @@
   (into (vs clz) (keys (bindings clz))))
 
 (defn scopes? [clz k]
-  (contains? (scope clz) k))
+  (or (contains? (bindings clz) k)
+    (contains? (vs clz) k)))
 
 ;; point of put-* things (rather than (assoc clz :vs vs), for
 ;; example) is to leave open possibility of not representing Clozes as
 ;; records, down the line. 
 (defn put-vs [clz vs]
-  (assert (set? vs))
-  (assoc clz :vs vs))
+  (make clz vs (bindings clz) (expr clz)))
 
 (defn put-bindings [clz bndgs]
-  (assert (map? bndgs))
-  (assoc clz :bindings bndgs))
+  (make clz (vs clz) bndgs (expr clz)))
 
 (defn put-expr [clz expr]
-  (assoc clz :expr expr))
+  (make clz (vs clz) (bindings clz) expr))
 
 ;; (defn put-vs-in [clz path vs])
 ;; (defn put-bindings-in [clz path bndgs])
@@ -261,7 +285,7 @@
   (-> (cond
         (list-like? x) (into (empty x) (reverse kids))
         (cloze? x) (let [[vs bndgs expr] kids]
-                     (Cloze. vs bndgs expr))
+                     (make x vs bndgs expr))
         (splice? x) (coll-splice kids) ;; yep need multimethod or something
         ;; WISH you didn't have to do this shit with maps, is total bullshit:
         (map? x) (into (empty x) (map vec kids))
@@ -287,6 +311,107 @@
 
 ;; this variant of CtxNode really just tracks scope (vs + bindings)
 ;;; "vs" should be "shadow", "vs" doesn't mean anything
+
+
+
+;; ============================================================
+;; replacement
+
+(declare collapse-walk-1 collapse-walk-repeated)
+
+(defn collapse
+  ([expr]
+   (collapse expr expr-traverser))
+  ([expr trav]
+   (collapse-walk-1 expr trav)))
+
+(defn collapse-all
+  ([expr]
+   (collapse-all expr expr-traverser))
+  ([expr trav]
+   (collapse-walk-repeated expr trav)))
+
+;; this could get more elaborate
+(defn cloze? [x]
+  (instance? Cloze x))
+
+(defn free [clz]
+  (reduce dissoc
+    (vs clz)
+    (keys (bindings clz))))
+
+(defn select-scope [clz keys]
+  (cloze
+    (sets/intersection (vs clz) keys)
+    (select-keys (bindings clz) keys)
+    (expr clz)))
+
+(defn sink
+  ([expr keys]
+   (sink expr keys expr-traverser))
+  ([expr keys trav]
+   (letfn [(f [clz]
+             (put-expr (reduce unscope clz keys)
+               (select-scope clz keys)))]
+     (trv/prewalk-shallow expr cloze? f trav))))
+
+(defn absorb
+  ([expr]
+   (absorb expr expr-traverser))
+  ([expr trav]
+   (let [clz (if (cloze? expr) expr (cloze nil nil expr))]
+     (loop [loc (trv/traverser-zip (expr clz) trav), clzs []]
+       (if (zip/end? loc)
+         (-> clz
+           (put-expr (zip/root loc))
+           (put-vs (reduce into (vs clz) (map vs clzs)))
+           (put-bindings (into (bindings clz) (map bindings clzs))))
+         (let [nd (zip/node loc)]
+           (if (cloze? nd)
+             (recur
+               (zupend (zip/replace loc (expr nd)))
+               (conj clzs nd))
+             (recur (zip/next loc) clzs))))))))
+
+(defn minimize
+  "Let res be clz with all its bound variables removed. If res has no
+  free variables, minimize-cloze returns (expr clz), otherwise
+  returns res. Does not do replacement, so if clz has variables bound
+  but not yet replaced in (expr clz) they will effectively
+  become open symbols; to avoid this, use collapse instead."
+  [clz]
+  (assert (cloze? clz) "requires cloze")
+  (let [vs2 (reduce disj
+              (vs clz)
+              (keys (bindings clz)))]
+    (if (empty? vs2)
+      (expr clz)
+      (-> clz
+        (put-bindings {})
+        (put-vs vs2)))))
+
+(defn absorb-only
+  ([expr keys]
+   (absorb-only expr keys expr-traverser))
+  ([expr keys trav]
+   (let [clz (if (cloze? expr) expr (cloze nil nil expr))]
+     (loop [loc (trv/traverser-zip (expr clz) trav), clzs []]
+       (if (zip/end? loc)
+         (-> clz
+           (put-expr (zip/root loc))
+           (put-vs (reduce into (vs clz) (map vs clzs)))
+           (put-bindings (into (bindings clz) (map bindings clzs))))
+         (let [nd (zip/node loc)]
+           (if (cloze? nd)
+             (recur
+               (zupend (zip/replace loc (minimize (reduce unscope nd keys))))
+               (conj clzs (select-scope nd keys)))
+             (recur (zip/next loc) clzs))))))))
+
+
+
+;; ============================================================
+;; context
 
 (defrecord CtxNode [ctx, expr])
 
@@ -318,70 +443,9 @@
 
 (defn expr->ctx-traverser [expr-trav]
   (trv/traverser
-    (ctx-branch-fn #(trv/branch? trav %))
-    (ctx-children-fn #(trv/children trav %))
-    (ctx-make-node-fn #(trv/make-node trav %))))
-
-;; ============================================================
-;; replacement
-
-(declare collapse-walk-1 collapse-walk-repeated)
-
-(defn collapse
-  ([expr]
-   (collapse expr expr-traverser))
-  ([expr trav]
-   (collapse-walk-1 expr trav)))
-
-(defn collapse-all
-  ([expr]
-   (collapse-all expr expr-traverser))
-  ([expr trav]
-   (collapse-walk-repeated expr trav)))
-
-;; this could get more elaborate
-(defn cloze? [x]
-  (instance? Cloze x))
-
-(defn free [clz]
-  (reduce dissoc
-    (vs clz)
-    (keys (bindings clz))))
-
-(defn absorb
-  ([clz]
-   (absorb clz expr-traverser))
-  ([clz trav]
-   (loop [loc (trv/traverser-zip (expr clz) trav), clzs []]
-     (if (zip/end? loc)
-       (let [expr (zip/root loc)]
-         (-> clz
-           (put-expr expr)
-           (put-vs (reduce into (vs clz) (map vs clzs)))
-           (put-bindings (into (bindings clz) (map bindings clzs)))))
-       (let [nd (zip/node loc)]
-         (if (cloze? nd)
-           (recur
-             (zupple (zip/replace loc (expr nd)))
-             (conj clzs nd))
-           (recur (zip/next loc) clzs)))))))
-
-(defn minimize
-  "Let res be clz with all its bound variables removed. If res has no
-  free variables, minimize-cloze returns (expr clz), otherwise
-  returns res. Does not do replacement, so if clz has variables bound
-  but not yet replaced in (expr clz) they will effectively
-  become open symbols; to avoid this, use collapse instead."
-  [clz]
-  (assert (cloze? clz) "requires cloze")
-  (let [vs2 (reduce disj
-              (vs clz)
-              (keys (bindings clz)))]
-    (if (empty? vs2)
-      (expr clz)
-      (-> clz
-        (put-bindings {})
-        (put-vs vs2)))))
+    (ctx-branch-fn #(trv/branch? expr-trav %))
+    (ctx-children-fn #(trv/children expr-trav %))
+    (ctx-make-node-fn #(trv/make-node expr-trav %1 %2))))
 
 ;; ============================================================
 ;; core transformation functions
@@ -472,7 +536,7 @@
             (if (< i (count pfs))
               (let [[p f] (pfs i)]
                 (if (p node)
-                  (zupple
+                  (zupend
                     (zip/edit loc f))
                   (recur (inc i))))
               (zip/next loc))))))))

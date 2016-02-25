@@ -329,6 +329,8 @@
 ;; ============================================================
 ;; replacement
 
+(declare collapse-walk-repeated)
+
 (defn collapse [expr]
   (collapse-walk-1 expr))
 

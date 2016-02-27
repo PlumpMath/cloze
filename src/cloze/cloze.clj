@@ -154,23 +154,23 @@
   ([clz f]
    (put-bindings clz (f (bindings clz))))
   ([clz f & args]
-   (put-vs clz (apply f (vs clz) args))))
+   (put-bindings clz (apply f (bindings clz) args))))
 
 (defn update-expr
   ([clz f]
    (put-expr clz (f (expr clz))))
   ([clz f & args]
-   (put-vs clz (apply f (vs clz) args))))
+   (put-expr clz (apply f (expr clz) args))))
 
 (defn update-clz-in
   ([clz [k & ks] f]
    (if ks
      (let [clz2 (get-binding clz k)]
        (if (cloze? clz2)
-         (bind clz k (update-clz-in ks f))
+         (bind clz k (update-clz-in clz2 ks f))
          (throw (Exception.
                   (str "element in path not Cloze, type of element: "
-                    (type clz2))))))
+                    (pr-str (type clz2)))))))
      (f (get-binding clz k))))
   ([clz ks f & args]
    (update-clz-in clz ks #(apply f % args) ks)))
@@ -179,19 +179,26 @@
   ([clz ks f]
    (update-clz-in clz ks #(update-vs % f)))
   ([clz ks f & args]
-   (update-vs-in clz ks #(apply f % args) ks)))
+   (update-vs-in clz ks #(apply f % args))))
 
 (defn update-bindings-in
   ([clz ks f]
    (update-clz-in clz ks #(update-bindings % f)))
   ([clz ks f & args]
-   (update-bindings-in clz ks #(apply f % args) ks)))
+   (update-bindings-in clz ks #(apply f % args))))
 
 (defn update-expr-in
   ([clz ks f]
    (update-clz-in clz ks #(update-expr % f)))
   ([clz ks f & args]
-   (update-expr-in clz ks #(apply f % args) ks)))
+   (update-expr-in clz ks #(apply f % args))))
+
+(defn update-in-bindings ; seems stupid to have this AND update-bindings-in
+  ([clz ks f]
+   (update-clz-in clz (butlast ks) 
+     #(update-bindings % update (last ks) f))) ; not sexy
+  ([clz ks f & args]
+   (update-bindings-in clz ks #(apply f % args))))
 
 ;; is this actually important?
 ;; (defn merge-vs [clz1 clz2])

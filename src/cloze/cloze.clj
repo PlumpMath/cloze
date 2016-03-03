@@ -195,10 +195,12 @@
 
 (defn update-in-bindings ; seems stupid to have this AND update-bindings-in
   ([clz ks f]
-   (update-clz-in clz (butlast ks) 
-     #(update-bindings % update (last ks) f))) ; not sexy
+   (if-let [ks2 (seq (butlast ks))] ; not sexy
+     (update-clz-in clz ks2 
+       #(update-bindings % update (last ks) f))
+     (update-bindings clz update (first ks) f)))
   ([clz ks f & args]
-   (update-bindings-in clz ks #(apply f % args))))
+   (update-in-bindings clz ks #(apply f % args))))
 
 ;; is this actually important?
 ;; (defn merge-vs [clz1 clz2])
